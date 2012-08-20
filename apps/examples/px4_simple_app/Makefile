@@ -32,11 +32,11 @@
 ############################################################################
 
 #
-# Makefile to build the sensor data collector
+# Basic example application
 #
 
-APPNAME		= sensors
-PRIORITY	= SCHED_PRIORITY_MAX-5
-STACKSIZE	= 4096
+APPNAME		 = px4_simple_app
+PRIORITY	 = SCHED_PRIORITY_DEFAULT
+STACKSIZE	 = 2048
 
 include $(APPDIR)/mk/app.mk

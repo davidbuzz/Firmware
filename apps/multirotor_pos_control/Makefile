@@ -32,11 +32,11 @@
 ############################################################################
 
 #
-# Makefile to build the sensor data collector
+# Makefile to build multirotor position control
 #
 
-APPNAME		= sensors
-PRIORITY	= SCHED_PRIORITY_MAX-5
-STACKSIZE	= 4096
+APPNAME		 = multirotor_pos_control
+PRIORITY	 = SCHED_PRIORITY_MAX - 25
+STACKSIZE	 = 2048
 
 include $(APPDIR)/mk/app.mk

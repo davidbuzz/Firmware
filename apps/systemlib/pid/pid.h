@@ -1,6 +1,9 @@
 /****************************************************************************
  *
- *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
+ *   Copyright (C) 2008-2012 PX4 Development Team. All rights reserved.
+ *   Author: @author Laurens Mackay <mackayl@student.ethz.ch>
+ *           @author Tobias Naegeli <naegelit@student.ethz.ch>
+ *           @author Martin Rutschmann <rutmarti@student.ethz.ch>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,42 +35,40 @@
  ****************************************************************************/
 
 /**
- * @file PX4FMU <-> PX4IO messaging protocol.
- *
- * This initial version of the protocol is very simple; each side transmits a
- * complete update with each frame.  This avoids the sending of many small
- * messages and the corresponding complexity involved.
+ * @file pid.h
+ * Definition of generic PID control interface
  */
 
-/*
- * XXX MUST BE KEPT IN SYNC WITH THE VERSION IN PX4FMU UNTIL
- * TREES ARE MERGED.
- */
+#ifndef PID_H_
+#define PID_H_
 
-#define PX4IO_OUTPUT_CHANNELS	8
-#define PX4IO_INPUT_CHANNELS	12
-#define PX4IO_RELAY_CHANNELS	2
+#include <stdint.h>
 
-#pragma pack(push, 1)
+/* PID_MODE_DERIVATIV_CALC calculates discrete derivative from previous error
+ * val_dot in pid_calculate() will be ignored */
+#define PID_MODE_DERIVATIV_CALC	0
+/* Use PID_MODE_DERIVATIV_SET if you have the derivative already (Gyros, Kalman) */
+#define PID_MODE_DERIVATIV_SET	1
 
-/* command from FMU to IO */
-struct px4io_command {
-	uint16_t	f2i_magic;
-#define F2I_MAGIC	0x636d
+typedef struct {
+	float kp;
+	float ki;
+	float kd;
+	float intmax;
+	float sp;
+	float integral;
+	float error_previous;
+	uint8_t mode;
+	uint8_t plot_i;
+	uint8_t count;
+	uint8_t saturated;
+} PID_t;
 
-	uint16_t	servo_command[PX4IO_OUTPUT_CHANNELS];
-	bool		relay_state[PX4IO_RELAY_CHANNELS];
-	bool		arm_ok;
-};
+__EXPORT void pid_init(PID_t *pid, float kp, float ki, float kd, float intmax, uint8_t mode, uint8_t plot_i);
+__EXPORT void pid_set_parameters(PID_t *pid, float kp, float ki, float kd, float intmax);
+//void pid_set(PID_t *pid, float sp);
+__EXPORT float pid_calculate(PID_t *pid, float sp, float val, float val_dot, float dt);
 
-/* report from IO to FMU */
-struct px4io_report {
-	uint16_t	i2f_magic;
-#define I2F_MAGIC		0x7570
 
-	uint16_t	rc_channel[PX4IO_INPUT_CHANNELS];
-	bool		armed;
-	uint8_t		channel_count;
-};
 
-#pragma pack(pop)
+#endif /* PID_H_ */

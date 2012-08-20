@@ -1,6 +1,7 @@
 /****************************************************************************
  *
  *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
+ *   Author: Lorenz Meier <lm@inf.ethz.ch>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,42 +33,47 @@
  ****************************************************************************/
 
 /**
- * @file PX4FMU <-> PX4IO messaging protocol.
+ * @file ardrone_motor_control.h
+ * Definition of AR.Drone 1.0 / 2.0 motor control interface
+ */
+
+#include <uORB/uORB.h>
+#include <uORB/topics/actuator_controls.h>
+
+/**
+ * Generate the 5-byte motor set packet.
  *
- * This initial version of the protocol is very simple; each side transmits a
- * complete update with each frame.  This avoids the sending of many small
- * messages and the corresponding complexity involved.
+ * @return the number of bytes (5)
  */
+void ar_get_motor_packet(uint8_t *motor_buf, uint16_t motor1, uint16_t motor2, uint16_t motor3, uint16_t motor4);
 
-/*
- * XXX MUST BE KEPT IN SYNC WITH THE VERSION IN PX4FMU UNTIL
- * TREES ARE MERGED.
+/**
+ * Select a motor in the multiplexing.
  */
+int ar_select_motor(int fd, uint8_t motor);
 
-#define PX4IO_OUTPUT_CHANNELS	8
-#define PX4IO_INPUT_CHANNELS	12
-#define PX4IO_RELAY_CHANNELS	2
+void ar_enable_broadcast(int fd);
 
-#pragma pack(push, 1)
+int ar_multiplexing_init(void);
+int ar_multiplexing_deinit(int fd);
 
-/* command from FMU to IO */
-struct px4io_command {
-	uint16_t	f2i_magic;
-#define F2I_MAGIC	0x636d
+/**
+ * Write four motor commands to an already initialized port.
+ *
+ * Writing 0 stops a motor, values from 1-512 encode the full thrust range.
+ * on some motor controller firmware revisions a minimum value of 10 is
+ * required to spin the motors.
+ */
+int ardrone_write_motor_commands(int ardrone_fd, uint16_t motor1, uint16_t motor2, uint16_t motor3, uint16_t motor4);
 
-	uint16_t	servo_command[PX4IO_OUTPUT_CHANNELS];
-	bool		relay_state[PX4IO_RELAY_CHANNELS];
-	bool		arm_ok;
-};
+/**
+ * Initialize the motors.
+ */
+int ar_init_motors(int ardrone_uart, int *gpios_pin);
 
-/* report from IO to FMU */
-struct px4io_report {
-	uint16_t	i2f_magic;
-#define I2F_MAGIC		0x7570
+/**
+ * Set LED pattern.
+ */
+void ar_set_leds(int ardrone_uart, uint8_t led1_red, uint8_t led1_green, uint8_t led2_red, uint8_t led2_green, uint8_t led3_red, uint8_t led3_green, uint8_t led4_red, uint8_t led4_green);
 
-	uint16_t	rc_channel[PX4IO_INPUT_CHANNELS];
-	bool		armed;
-	uint8_t		channel_count;
-};
-
-#pragma pack(pop)
+void ardrone_mixing_and_output(int ardrone_write, const struct actuator_controls_s *actuators, bool verbose);

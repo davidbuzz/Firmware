@@ -95,10 +95,7 @@ static int leds;
 static int buzzer;
 static int mavlink_fd;
 static bool commander_initialized = false;
-static struct vehicle_status_s current_status = {
-	.state_machine = SYSTEM_STATE_PREFLIGHT,
-	.mode = 0
-}; /**< Main state machine */
+static struct vehicle_status_s current_status; /**< Main state machine */
 static int stat_pub;
 
 static uint16_t nofix_counter = 0;
@@ -376,9 +373,22 @@ void do_mag_calibration(int status_pub, struct vehicle_status_s *status)
 	printf("\nFINAL:\nmag min: %d\t%d\t%d\nmag max: %d\t%d\t%d\n", (int)min_avg[0], (int)min_avg[1], (int)min_avg[2], (int)max_avg[0], (int)max_avg[1], (int)max_avg[2]);
 
 	float mag_offset[3];
-	mag_offset[0] = (max_avg[0] - min_avg[0]);
-	mag_offset[1] = (max_avg[1] - min_avg[1]);
-	mag_offset[2] = (max_avg[2] - min_avg[2]);
+
+	/**
+	 * The offset is subtracted from the sensor values, so the result is the
+	 * POSITIVE number that has to be subtracted from the sensor data
+	 * to shift the center to zero
+	 *
+	 * offset = max - ((max - min) / 2.0f)
+	 *
+	 * which reduces to
+	 *
+	 * offset = (max + min) / 2.0f
+	 */
+
+	mag_offset[0] = (max_avg[0] + min_avg[0]) / 2.0f;
+	mag_offset[1] = (max_avg[1] + min_avg[1]) / 2.0f;
+	mag_offset[2] = (max_avg[2] + min_avg[2]) / 2.0f;
 
 	global_data_parameter_storage->pm.param_values[PARAM_SENSOR_MAG_XOFFSET] = mag_offset[0];
 	global_data_parameter_storage->pm.param_values[PARAM_SENSOR_MAG_YOFFSET] = mag_offset[1];
@@ -785,6 +795,7 @@ int commander_main(int argc, char *argv[])
 	/* make sure we are in preflight state */
 	memset(&current_status, 0, sizeof(current_status));
 	current_status.state_machine = SYSTEM_STATE_PREFLIGHT;
+	current_status.flag_system_armed = false;
 
 	/* advertise to ORB */
 	stat_pub = orb_advertise(ORB_ID(vehicle_status), &current_status);
@@ -892,8 +903,8 @@ int commander_main(int argc, char *argv[])
 			}
 
 			/* toggle error led at 5 Hz in HIL mode */
-			if ((current_status.mode & VEHICLE_MODE_FLAG_HIL_ENABLED)) {
-				/* armed */
+			if (current_status.flag_hil_enabled) {
+				/* hil enabled */
 				led_toggle(LED_AMBER);
 
 			} else if (bat_remain < 0.3f && (low_voltage_counter > LOW_VOLTAGE_BATTERY_COUNTER_LIMIT)) {

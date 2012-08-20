@@ -1,6 +1,10 @@
 /****************************************************************************
  *
- *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
+ *   Copyright (C) 2008-2012 PX4 Development Team. All rights reserved.
+ *   Author: @author Lorenz Meier <lm@inf.ethz.ch>
+ *           @author Laurens Mackay <mackayl@student.ethz.ch>
+ *           @author Tobias Naegeli <naegelit@student.ethz.ch>
+ *           @author Martin Rutschmann <rutmarti@student.ethz.ch>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,42 +36,15 @@
  ****************************************************************************/
 
 /**
- * @file PX4FMU <-> PX4IO messaging protocol.
- *
- * This initial version of the protocol is very simple; each side transmits a
- * complete update with each frame.  This avoids the sending of many small
- * messages and the corresponding complexity involved.
+ * @file multirotor_position_control.h
+ * Definition of the position control for a multirotor VTOL
  */
 
-/*
- * XXX MUST BE KEPT IN SYNC WITH THE VERSION IN PX4FMU UNTIL
- * TREES ARE MERGED.
- */
+#ifndef POSITION_CONTROL_H_
+#define POSITION_CONTROL_H_
 
-#define PX4IO_OUTPUT_CHANNELS	8
-#define PX4IO_INPUT_CHANNELS	12
-#define PX4IO_RELAY_CHANNELS	2
+void control_multirotor_position(const struct vehicle_state_s *vstatus, const struct vehicle_manual_control_s *manual,
+ const struct vehicle_attitude_s *att, const struct vehicle_local_position_s *local_pos,
+ const struct vehicle_local_position_setpoint_s *local_pos_sp, struct vehicle_attitude_setpoint_s *att_sp);
 
-#pragma pack(push, 1)
-
-/* command from FMU to IO */
-struct px4io_command {
-	uint16_t	f2i_magic;
-#define F2I_MAGIC	0x636d
-
-	uint16_t	servo_command[PX4IO_OUTPUT_CHANNELS];
-	bool		relay_state[PX4IO_RELAY_CHANNELS];
-	bool		arm_ok;
-};
-
-/* report from IO to FMU */
-struct px4io_report {
-	uint16_t	i2f_magic;
-#define I2F_MAGIC		0x7570
-
-	uint16_t	rc_channel[PX4IO_INPUT_CHANNELS];
-	bool		armed;
-	uint8_t		channel_count;
-};
-
-#pragma pack(pop)
+#endif /* POSITION_CONTROL_H_ */

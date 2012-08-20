@@ -1,6 +1,12 @@
 /****************************************************************************
  *
  *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
+ *   Author: @author Thomas Gubler <thomasgubler@student.ethz.ch>
+ *           @author Julian Oes <joes@student.ethz.ch>
+ *           @author Laurens Mackay <mackayl@student.ethz.ch>
+ *           @author Tobias Naegeli <naegelit@student.ethz.ch>
+ *           @author Martin Rutschmann <rutmarti@student.ethz.ch>
+ *           @author Lorenz Meier <lm@inf.ethz.ch>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,43 +37,25 @@
  *
  ****************************************************************************/
 
-/**
- * @file PX4FMU <-> PX4IO messaging protocol.
- *
- * This initial version of the protocol is very simple; each side transmits a
- * complete update with each frame.  This avoids the sending of many small
- * messages and the corresponding complexity involved.
- */
-
 /*
- * XXX MUST BE KEPT IN SYNC WITH THE VERSION IN PX4FMU UNTIL
- * TREES ARE MERGED.
+ * @file multirotor_attitude_control.h
+ * Attitude control for multi rotors.
  */
 
-#define PX4IO_OUTPUT_CHANNELS	8
-#define PX4IO_INPUT_CHANNELS	12
-#define PX4IO_RELAY_CHANNELS	2
+#ifndef MULTIROTOR_ATTITUDE_CONTROL_H_
+#define MULTIROTOR_ATTITUDE_CONTROL_H_
 
-#pragma pack(push, 1)
+#include <uORB/uORB.h>
+#include <uORB/topics/rc_channels.h>
+#include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/vehicle_attitude_setpoint.h>
+#include <uORB/topics/ardrone_control.h>
+#include <uORB/topics/vehicle_status.h>
+#include <uORB/topics/actuator_controls.h>
 
-/* command from FMU to IO */
-struct px4io_command {
-	uint16_t	f2i_magic;
-#define F2I_MAGIC	0x636d
+void multirotor_control_attitude(const struct vehicle_attitude_setpoint_s *att_sp, const struct vehicle_attitude_s *att,
+		const struct vehicle_status_s *status, struct actuator_controls_s *actuators, bool verbose);
 
-	uint16_t	servo_command[PX4IO_OUTPUT_CHANNELS];
-	bool		relay_state[PX4IO_RELAY_CHANNELS];
-	bool		arm_ok;
-};
+void ardrone_mixing_and_output(int ardrone_write, const struct actuator_controls_s *actuators, bool verbose);
 
-/* report from IO to FMU */
-struct px4io_report {
-	uint16_t	i2f_magic;
-#define I2F_MAGIC		0x7570
-
-	uint16_t	rc_channel[PX4IO_INPUT_CHANNELS];
-	bool		armed;
-	uint8_t		channel_count;
-};
-
-#pragma pack(pop)
+#endif /* MULTIROTOR_ATTITUDE_CONTROL_H_ */

@@ -32,42 +32,34 @@
  ****************************************************************************/
 
 /**
- * @file PX4FMU <-> PX4IO messaging protocol.
+ * @file err.h
  *
- * This initial version of the protocol is very simple; each side transmits a
- * complete update with each frame.  This avoids the sending of many small
- * messages and the corresponding complexity involved.
+ * Simple error/warning functions, heavily inspired by the BSD functions of
+ * the same names.
  */
 
-/*
- * XXX MUST BE KEPT IN SYNC WITH THE VERSION IN PX4FMU UNTIL
- * TREES ARE MERGED.
- */
+#ifndef _SYSTEMLIB_ERR_H
+#define _SYSTEMLIB_ERR_H
 
-#define PX4IO_OUTPUT_CHANNELS	8
-#define PX4IO_INPUT_CHANNELS	12
-#define PX4IO_RELAY_CHANNELS	2
+#include <stdarg.h>
 
-#pragma pack(push, 1)
+__BEGIN_DECLS
 
-/* command from FMU to IO */
-struct px4io_command {
-	uint16_t	f2i_magic;
-#define F2I_MAGIC	0x636d
+__EXPORT const char *getprogname(void);
 
-	uint16_t	servo_command[PX4IO_OUTPUT_CHANNELS];
-	bool		relay_state[PX4IO_RELAY_CHANNELS];
-	bool		arm_ok;
-};
+__EXPORT void	err(int, const char *, ...) __attribute__((noreturn,format(printf,2, 3)));
+__EXPORT void	verr(int, const char *, va_list) __attribute__((noreturn,format(printf,2, 0)));
+__EXPORT void	errc(int, int, const char *, ...) __attribute__((noreturn,format(printf,3, 4)));
+__EXPORT void	verrc(int, int, const char *, va_list) __attribute__((noreturn,format(printf,3, 0)));
+__EXPORT void	errx(int, const char *, ...) __attribute__((noreturn,format(printf,2, 3)));
+__EXPORT void	verrx(int, const char *, va_list) __attribute__((noreturn,format(printf,2, 0)));
+__EXPORT void	warn(const char *, ...)  __attribute__((format(printf,1, 2)));
+__EXPORT void	vwarn(const char *, va_list)  __attribute__((format(printf,1, 0)));
+__EXPORT void	warnc(int, const char *, ...)  __attribute__((format(printf,2, 3)));
+__EXPORT void	vwarnc(int, const char *, va_list)  __attribute__((format(printf,2, 0)));
+__EXPORT void	warnx(const char *, ...)  __attribute__((format(printf,1, 2)));
+__EXPORT void	vwarnx(const char *, va_list)  __attribute__((format(printf,1, 0)));
 
-/* report from IO to FMU */
-struct px4io_report {
-	uint16_t	i2f_magic;
-#define I2F_MAGIC		0x7570
+__END_DECLS
 
-	uint16_t	rc_channel[PX4IO_INPUT_CHANNELS];
-	bool		armed;
-	uint8_t		channel_count;
-};
-
-#pragma pack(pop)
+#endif
