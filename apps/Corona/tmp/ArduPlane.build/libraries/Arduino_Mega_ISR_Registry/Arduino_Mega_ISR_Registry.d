@@ -1,0 +1,25 @@
+/Users/buzz/PX4/Firmware/apps/Corona/tmp/ArduPlane.build/libraries/Arduino_Mega_ISR_Registry/Arduino_Mega_ISR_Registry.o: \
+ /Users/buzz/PX4/Firmware/apps/Corona//libraries/Arduino_Mega_ISR_Registry/Arduino_Mega_ISR_Registry.cpp \
+ /Users/buzz/PX4/Firmware/nuttx/include/stdlib.h \
+ /Users/buzz/PX4/Firmware/nuttx/include/nuttx/config.h \
+ /Users/buzz/PX4/Firmware/nuttx/include/nuttx/compiler.h \
+ /Users/buzz/PX4/Firmware/nuttx/include/sys/types.h \
+ /Users/buzz/PX4/Firmware/nuttx/include/stdint.h \
+ /Users/buzz/PX4/Firmware/nuttx/include/arch/types.h \
+ /Users/buzz/PX4/Firmware/nuttx/include/limits.h \
+ /Users/buzz/PX4/Firmware/nuttx/include/arch/limits.h \
+ /Users/buzz/PX4/Firmware/apps/Corona//libraries/Arduino_Mega_ISR_Registry/Arduino_Mega_ISR_Registry.h \
+ /Users/buzz/PX4/Firmware/apps/Corona//libraries/Desktop/include/avr/interrupt.h \
+ /Users/buzz/PX4/Firmware/apps/Corona//libraries/Desktop/include/avr/io.h \
+ /Users/buzz/PX4/Firmware/apps/Corona//libraries/Desktop/include/avr/iom2560.h \
+ /Users/buzz/PX4/Firmware/apps/Corona//libraries/Desktop/include/avr/iomxx0_1.h \
+ /Users/buzz/PX4/Firmware/apps/Corona//libraries/Desktop/include/../support/sitl_rc.h \
+ /Users/buzz/PX4/Firmware/apps/Corona//libraries/Desktop/include/../support/sitl_adc.h \
+ /Users/buzz/PX4/Firmware/nuttx/include/math.h \
+ /Users/buzz/PX4/Firmware/nuttx/include/arch/math.h \
+ /usr/local/Cellar/gcc-arm-none-eabi/4.6-2012q1/lib/gcc/arm-none-eabi/4.6.2/../../../../arm-none-eabi/include/machine/ieeefp.h \
+ /usr/local/Cellar/gcc-arm-none-eabi/4.6-2012q1/lib/gcc/arm-none-eabi/4.6.2/../../../../arm-none-eabi/include/_ansi.h \
+ /usr/local/Cellar/gcc-arm-none-eabi/4.6-2012q1/lib/gcc/arm-none-eabi/4.6.2/../../../../arm-none-eabi/include/newlib.h \
+ /usr/local/Cellar/gcc-arm-none-eabi/4.6-2012q1/lib/gcc/arm-none-eabi/4.6.2/../../../../arm-none-eabi/include/sys/config.h \
+ /usr/local/Cellar/gcc-arm-none-eabi/4.6-2012q1/lib/gcc/arm-none-eabi/4.6.2/../../../../arm-none-eabi/include/sys/features.h \
+ /Users/buzz/PX4/Firmware/apps/Corona//libraries/Desktop/include/../support/util.h

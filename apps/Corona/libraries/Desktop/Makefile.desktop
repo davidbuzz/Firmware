@@ -1,0 +1,7 @@
+DESKTOP=$(PWD)/../libraries/Desktop
+
+include ../libraries/Desktop/Desktop.mk
+
+default:
+	make -f $(DESKTOP)/Makefile.desktop
+

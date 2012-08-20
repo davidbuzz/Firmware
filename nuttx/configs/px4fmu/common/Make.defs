@@ -175,29 +175,29 @@ _v				 = @
 endif
 
 define PREPROCESS
-	@echo "CPP: $1->$2"
-	@$(CPP) $(CPPFLAGS) $(abspath $1) -o $2
+	echo "CPP: $1->$2"
+	$(CPP) $(CPPFLAGS) $(abspath $1) -o $2
 endef
 
 define COMPILE
-	@echo "CC: $1"
+	echo "CC: $1"
 	$(_v)$(CC) -c $(CFLAGS) $(abspath $1) -o $2
 endef
 
 define COMPILEXX
-	@echo "CXX: $1"
+	echo "CXX: $1"
 	$(_v)$(CXX) -c $(CXXFLAGS) $(abspath $1) -o $2
 endef
 
 define ASSEMBLE
-	@echo "AS: $1"
+	echo "AS: $1"
 	$(_v)$(CC) -c $(AFLAGS) $(abspath $1) -o $2
 endef
 
 # produce partially-linked $1 from files in $2
 define PRELINK
-	@echo "PRELINK: $1"
-	@$(LD) -Ur -o $1 $2 && $(OBJCOPY) --localize-hidden $1
+	echo "PRELINK: $1"
+	$(LD) -Ur -o $1 $2 && $(OBJCOPY) --localize-hidden $1
 endef
 
 define ARCHIVE
@@ -206,7 +206,7 @@ define ARCHIVE
 endef
 
 define CLEAN
-	@rm -f *.o *.a
+	rm -f *.o *.a
 endef
 
 HOSTCC			 = gcc

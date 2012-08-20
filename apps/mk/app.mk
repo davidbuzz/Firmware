@@ -179,9 +179,9 @@ all:		.built
 #
 depend:		.depend
 .depend:	$(MAKEFILE_LIST) $(SRCS)
-	@$(MKDEP) --dep-path . $(CC) -- $(CFLAGS) -- $(CSRCS) >Make.dep
-	@$(MKDEP) --dep-path . $(CXX) -- $(CXXFLAGS) -- $(CXXSRCS) >>Make.dep
-	@touch $@
+	$(MKDEP) --dep-path . $(CC) -- $(CFLAGS) -- $(CSRCS) >Make.dep
+	$(MKDEP) --dep-path . $(CXX) -- $(CXXFLAGS) -- $(CXXSRCS) >>Make.dep
+	touch $@
 
 ifneq ($(APPNAME),)
 #
@@ -190,7 +190,7 @@ ifneq ($(APPNAME),)
 context:	.context
 .context:	$(MAKEFILE_LIST)
 	$(call REGISTER,$(APPNAME),$(PRIORITY),$(STACKSIZE),$(APPNAME)_main)
-	@touch $@
+	touch $@
 else
 context:
 endif
