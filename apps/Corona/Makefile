@@ -50,7 +50,12 @@ post-build: build
 #	
 
 # the first pre-build like gets us the single bundled up .cpp file from NuttX.mk ( we'll move that here later)
-pre-build: make-src-arduino-style
+pre-build:	make-src-arduino-style
+	@echo "Register: Corona"
+	@echo "{ \"Corona\", SCHED_PRIORITY_DEFAULT, 2048, Corona_main }," >> "$(APPDIR)/namedapp/namedapp_list.h"
+	@echo "EXTERN int Corona_main(int argc, char *argv[]);" >> "$(APPDIR)/namedapp/namedapp_proto.h"
+
+
 
 make-src-arduino-style:
 	(cd ArduPlane && make -f ../libraries/Desktop/NuttX.mk generate-sketch-src)
@@ -64,6 +69,12 @@ addheaders:
 
 # base nuttx 'apps' folder we are working from.  
 APPDIR := /Users/buzz/PX4/Firmware/apps
+
+#register as a named app in namedapp/namedapp.h via apps/Make.defs
+#-include $(APPDIR)/Make.defs
+
+
+
 
 #contains 'ArduPlane' and 'libraries' etc.
 SKETCHBOOK := $(APPDIR)/Corona
