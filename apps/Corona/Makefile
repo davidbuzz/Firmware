@@ -50,7 +50,9 @@ post-build: build
 #	
 
 # the first pre-build like gets us the single bundled up .cpp file from NuttX.mk ( we'll move that here later)
-pre-build:
+pre-build: make-src-arduino-style
+
+make-src-arduino-style:
 	(cd ArduPlane && make -f ../libraries/Desktop/NuttX.mk generate-sketch-src)
 
 # the second pre-build line copies the .h file from the Sketch folder to the buld folder, or the link fails. ( again, a hack)
@@ -82,6 +84,10 @@ BUILDROOT		:=	$(abspath $(TMPDIR)/$(SKETCH).build)
 
 # resulting bundles cpp file is this: 
 CXXSRCS := tmp/ArduPlane.build/ArduPlane.cpp
+
+# to make the lack of the .cpp file trigger the pre-build instead if the 
+tmp/ArduPlane.build/ArduPlane.cpp: make-src-arduino-style
+	
 
 CONFIG_HAVE_CXX := y
 
