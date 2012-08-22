@@ -239,12 +239,24 @@ BUILDROOT		:=	$(abspath $(TMPDIR)/$(SKETCH).build)
 SKETCHLIBINCLUDES	:=	$(addprefix -I,$(SKETCHLIBSRCDIRS))
 SKETCH_INCLUDES	=	$(SKETCHLIBINCLUDES)
 
-OPTFLAGS := -Wall -Wextra -Wdouble-promotion -Wshadow -Wfloat-equal -Wframe-larger-than=1024 \
--Wpointer-arith -Wlogical-op -Wmissing-declarations -Wpacked -Wno-unused-parameter \
--Os -fno-strict-aliasing \
--fno-strength-reduce -fomit-frame-pointer -funsafe-math-optimizations -fno-builtin-printf \
--ffunction-sections -fdata-sections -g -mcpu=cortex-m4 -mthumb -march=armv7e-m \
--mfpu=fpv4-sp-d16 -mfloat-abi=hard 
+# COPTS
+#OPTFLAGS := -Wall -Wextra -Wdouble-promotion -Wshadow -Wfloat-equal -Wframe-larger-than=1024 \
+#-Wpointer-arith -Wlogical-op -Wmissing-declarations -Wpacked -Wno-unused-parameter \
+#-Os -fno-strict-aliasing \
+#-fno-strength-reduce -fomit-frame-pointer -funsafe-math-optimizations -fno-builtin-printf \
+#-ffunction-sections -fdata-sections -g -mcpu=cortex-m4 -mthumb -march=armv7e-m \
+#-mfpu=fpv4-sp-d16 -mfloat-abi=hard 
+
+
+#CXXOPTS:
+OPTFLAGS := -fno-exceptions -fno-rtti -std=gnu++0x -Wall -Wextra -Wdouble-promotion -Wshadow \
+-Wfloat-equal -Wframe-larger-than=1024 -Wpointer-arith -Wlogical-op -Wmissing-declarations \
+-Wpacked -Wno-unused-parameter -Os -fno-strict-aliasing -fno-strength-reduce -fomit-frame-pointer \
+-funsafe-math-optimizations -fno-builtin-printf -ffunction-sections -fdata-sections -g \
+-mcpu=cortex-m4 -mthumb -march=armv7e-m -mfpu=fpv4-sp-d16 -mfloat-abi=hard -I. \
+-isystem /Users/buzz/PX4/Firmware/nuttx/include -isystem /Users/buzz/PX4/Firmware/nuttx/include/cxx \
+-finstrument-functions -ffixed-r10  -D__KERNEL__=__KERNEL__ -pipe -fvisibility=hidden \
+-include /Users/buzz/PX4/Firmware/apps/systemlib/visibility.h
 
 CXXFLAGS := $(OPTFLAGS) -DSKETCH=\"$(SKETCH)\" -D__AVR_ATmega2560__ -Wshadow  -I/Users/buzz/PX4/Firmware/apps/Corona/libraries/Desktop/include $(SKETCH_INCLUDES)  -DDESKTOP_BUILD=1
 ASFLAGS  := $(OPTFLAGS) -DSKETCH=\"$(SKETCH)\"
