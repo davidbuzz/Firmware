@@ -10,7 +10,7 @@ static int eeprom_fd;
 static void eeprom_open(void)
 {
 	if (eeprom_fd == 0) {
-		eeprom_fd = open("eeprom.bin", O_RDWR|O_CREAT, 0777);
+		//eeprom_fd = open("eeprom.bin", O_RDWR|O_CREAT, 0777);
 		//ftruncate(eeprom_fd, 4096);
 	}
 }

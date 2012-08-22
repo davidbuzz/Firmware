@@ -46,7 +46,7 @@ static struct {
  */
 ssize_t sitl_gps_read(int fd, void *buf, size_t count)
 {
-	return read(fd, buf, count);
+	//return read(fd, buf, count);
 }
 
 /*

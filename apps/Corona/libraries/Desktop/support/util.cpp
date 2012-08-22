@@ -20,8 +20,8 @@
 
 void set_nonblocking(int fd)
 {
-	unsigned v = fcntl(fd, F_GETFL, 0);
-	fcntl(fd, F_SETFL, v | O_NONBLOCK);
+	//unsigned v = fcntl(fd, F_GETFL, 0);
+	//fcntl(fd, F_SETFL, v | O_NONBLOCK);
 }
 
 double normalise(double v, double min, double max)

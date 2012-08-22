@@ -17,6 +17,6 @@ int digitalRead(uint8_t address)
 	default:
 		break;
 	}
-	printf("digitalRead(0x%x) unsupported\n", address);
+	//printf("digitalRead(0x%x) unsupported\n", address);
 	return 0;
 }
