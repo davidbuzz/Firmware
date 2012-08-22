@@ -39,6 +39,25 @@ static void usage(void)
 }
 
 
+//http://stackoverflow.com/questions/3381390/using-gcc-g-instrument-functions-with-mingw
+// for --instrument-functions 
+extern "C" {
+  void __cyg_profile_func_enter( void *, void * ) __attribute__ ((no_instrument_function));
+
+  void __cyg_profile_func_enter(void *func, void *callsite)
+  {
+    //printf("enter %p\n", func);
+  }
+  void __cyg_profile_func_exit( void *, void * ) __attribute__ ((no_instrument_function));
+
+  void __cyg_profile_func_exit(void *func, void *callsite)
+  {
+    //printf("exit %p\n", func);
+  }
+
+}
+
+
 int main(int argc, char *argv[]) { } 
 
 void _exit(int i) { } 
