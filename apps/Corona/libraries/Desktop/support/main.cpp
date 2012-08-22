@@ -58,9 +58,9 @@ extern "C" {
 }
 
 
-int main(int argc, char *argv[]) { } 
+//int main(int argc, char *argv[]) { } 
 
-void _exit(int i) { } 
+//void _exit(int i) { } 
 
 //void *_sbrk(ptrdiff_t i) {} 
 
