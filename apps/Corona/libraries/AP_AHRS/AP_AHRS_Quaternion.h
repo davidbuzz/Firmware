@@ -62,7 +62,7 @@ private:
 	void 		accel_adjust(void);
 
 	// maximum gyroscope measurement error in rad/s (set to 7 degrees/second)
-	static const float gyroMeasError = 20.0 * (M_PI/180.0);
+	static constexpr float gyroMeasError = 20.0 * (M_PI/180.0);
 
 	// scaled tuning constants
 	float beta;
