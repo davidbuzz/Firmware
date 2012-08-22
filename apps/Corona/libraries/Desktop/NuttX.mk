@@ -462,6 +462,12 @@ define SKETCH_PROTOTYPER
   }
 endef
 
+# a hack, as I don't know how to make these be picked up from where they were. 
+addheaders:
+	rm -rf tmp
+	mkdir -p /Users/buzz/PX4/Firmware/apps/Corona/tmp/ArduPlane.build
+	cp /Users/buzz/PX4/Firmware/apps/Corona/ArduPlane/*.h /Users/buzz/PX4/Firmware/apps/Corona/tmp/ArduPlane.build/
+	
+generate-sketch-src: $(SKETCHCPP) addheaders
 
-generate-sketch-src: $(SKETCHCPP)
 

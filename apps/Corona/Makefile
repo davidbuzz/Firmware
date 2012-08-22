@@ -54,9 +54,10 @@ pre-build:
 	(cd ArduPlane && make -f ../libraries/Desktop/NuttX.mk generate-sketch-src)
 
 # the second pre-build line copies the .h file from the Sketch folder to the buld folder, or the link fails. ( again, a hack)
-
-post-build:
-	(rm -rf tmp ; mkdir -p tmp/ArduPlane.build ; cp ArduPlane/*.h ./tmp/ArduPlane.build/ ) 
+addheaders:
+	rm -rf tmp
+	mkdir -p tmp/ArduPlane.build
+	cp ArduPlane/*.h ./tmp/ArduPlane.build/
 	
 
 # base nuttx 'apps' folder we are working from.  
