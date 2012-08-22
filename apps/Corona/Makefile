@@ -43,17 +43,21 @@
 
 build: pre-build
 
+post-build: build
+
 #clean:
 #	cd /Users/buzz/PX4/Firmware
 #	
 
+# the first pre-build like gets us the single bundled up .cpp file from NuttX.mk ( we'll move that here later)
 pre-build:
 	(cd ArduPlane && make -f ../libraries/Desktop/NuttX.mk generate-sketch-src)
-	
-#	
-#build:
-#	(cd ArduPlane && make -f ../libraries/Desktop/NuttX.mk)
 
+# the second pre-build line copies the .h file from the Sketch folder to the buld folder, or the link fails. ( again, a hack)
+
+post-build:
+	(rm -rf tmp ; mkdir -p tmp/ArduPlane.build ; cp ArduPlane/*.h ./tmp/ArduPlane.build/ ) 
+	
 
 # base nuttx 'apps' folder we are working from.  
 APPDIR := /Users/buzz/PX4/Firmware/apps
@@ -152,7 +156,7 @@ ALLDEPS			=	$(ALLOBJS:%.o=%.d)
 all:	$(SKETCHELF)
 
 # nuttx primary build target:
-build:	$(SKETCHELF)
+build:	all
 
 clean:
 	rm -fr $(BUILDROOT)
@@ -174,6 +178,12 @@ define RULEHDR
 	echo %% $(subst $(BUILDROOT)/,,$@)
 	mkdir -p $(dir $@)
 endef
+
+LIBS :=	 -L/Users/buzz/PX4/Firmware/nuttx/lib -L/Users/buzz/PX4/Firmware/nuttx/libxx -L/Users/buzz/PX4/Firmware/nuttx/lib/math -L/Users/buzz/PX4/Firmware/nuttx/mm -L/Users/buzz/PX4/Firmware/nuttx/sched -L/Users/buzz/PX4/Firmware/nuttx/arch/arm/src -L/Users/buzz/PX4/Firmware/nuttx/arch/arm/lib
+
+LDFLAGS			=	-Ur -g
+#LD			:=	/usr/local/Cellar/gcc-arm-none-eabi/4.6-2012q1/bin/arm-none-eabi-ld
+
 
 # Link the final object 
 $(SKETCHELF):	$(SKETCHOBJS) $(LIBOBJS) $(CORELIB)
@@ -248,11 +258,11 @@ SKETCH_INCLUDES	=	$(SKETCHLIBINCLUDES)
 #-mfpu=fpv4-sp-d16 -mfloat-abi=hard 
 
 
-#CXXOPTS:
-OPTFLAGS := -fno-exceptions -fno-rtti -std=gnu++0x -Wall -Wextra -Wdouble-promotion -Wshadow \
+#CXXOPTS: -fno-builtin-printf 
+OPTFLAGS := -fpermissive -fno-exceptions -fno-rtti -std=gnu++0x -Wall -Wextra -Wdouble-promotion -Wshadow \
 -Wfloat-equal -Wframe-larger-than=1024 -Wpointer-arith -Wlogical-op -Wmissing-declarations \
 -Wpacked -Wno-unused-parameter -Os -fno-strict-aliasing -fno-strength-reduce -fomit-frame-pointer \
--funsafe-math-optimizations -fno-builtin-printf -ffunction-sections -fdata-sections -g \
+-funsafe-math-optimizations -ffunction-sections -fdata-sections -g \
 -mcpu=cortex-m4 -mthumb -march=armv7e-m -mfpu=fpv4-sp-d16 -mfloat-abi=hard -I. \
 -isystem /Users/buzz/PX4/Firmware/nuttx/include -isystem /Users/buzz/PX4/Firmware/nuttx/include/cxx \
 -finstrument-functions -ffixed-r10  -D__KERNEL__=__KERNEL__ -pipe -fvisibility=hidden \
