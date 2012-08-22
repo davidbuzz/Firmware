@@ -55,10 +55,174 @@ pre-build:
 #	(cd ArduPlane && make -f ../libraries/Desktop/NuttX.mk)
 
 
+# base nuttx 'apps' folder we are working from.  
+APPDIR := /Users/buzz/PX4/Firmware/apps
+
+#contains 'ArduPlane' and 'libraries' etc.
+SKETCHBOOK := $(APPDIR)/Corona
+
+SKETCH := ArduPlane
+
+DEFINES			=	-DSKETCH=\"$(SKETCH)\"
+
+
+# arduplane folder:
+SRCROOT			:=	$(SKETCHBOOK)/$(SKETCH)/
+
+
+TMPDIR			:=	$(SKETCHBOOK)/tmp
+
+BUILDROOT		:=	$(abspath $(TMPDIR)/$(SKETCH).build)
+
+
+# resulting bundles cpp file is this: 
 CXXSRCS := tmp/ArduPlane.build/ArduPlane.cpp
 
+CONFIG_HAVE_CXX := y
 
-INCLUDES := /Users/buzz/PX4/Firmware/apps/Corona/libraries/Desktop/include /Users/buzz/PX4/Firmware/nuttx/include
+# equivalently: 
+SKETCHCPP		:=	$(BUILDROOT)/$(SKETCH).cpp
+
+SRCSUFFIXES		=	*.cpp *.c
+
+
+# we search all these files for "#include" statements for libs: * .c *.cpp. *pde 
+SKETCHPDESRCS	:=	$(wildcard $(SRCROOT)/*.pde)
+SKETCHSRCS		:=	$(wildcard $(addprefix $(SRCROOT)/,$(SRCSUFFIXES)))
+
+
+# build a list of LIBTOKENS form the SRC file/s 
+SYSTYPE			:=	$(shell uname)
+SEXPR			=	's/^[[:space:]]*\#include[[:space:]][<\"]([^>\"./]+).*$$/\1/p'
+ifeq ($(SYSTYPE),Darwin)
+  LIBTOKENS        :=    $(sort $(shell cat $(SKETCHPDESRCS) $(SKETCHSRCS) | sed -nEe $(SEXPR)))
+else
+  LIBTOKENS        :=    $(sort $(shell cat $(SKETCHPDESRCS) $(SKETCHSRCS) | sed -nre $(SEXPR)))
+endif
+
+
+# list of librarys in the /libraries/ folder: 
+SKETCHLIBS		:=	$(wildcard $(addprefix $(SKETCHBOOK)/libraries/,$(LIBTOKENS)))
+SKETCHLIBNAMES		:=	$(notdir $(SKETCHLIBS))
+
+#all the folders these libraries might be found in, we sneak in the Desktop/support and */utility/*  here too.
+SKETCHLIBSRCDIRS	:=	$(SKETCHLIBS) $(SKETCHBOOK)/libraries/Desktop/support $(addsuffix /utility,$(SKETCHLIBS))
+
+
+
+# build a list of all the possible library names from the library source files *.c and *.cpp
+SKETCHLIBSRCS		:=	$(wildcard $(foreach suffix,$(SRCSUFFIXES),$(addsuffix /$(suffix),$(SKETCHLIBSRCDIRS))))
+
+# remove difficult or undesirable libraries from build: 
+NODESKTOP		:= I2C/I2C.cpp DataFlash/DataFlash_APM1.cpp FastSerial/FastSerial.cpp AP_Compass/AP_Compass_HMC5843.cpp AP_Baro/AP_Baro_BMP085.cpp
+FILTEREDSRCS		:=	$(filter-out $(addprefix $(SKETCHBOOK)/libraries/,$(NODESKTOP)),$(SKETCHLIBSRCS))
+
+# this defines a list of all the possible .o fils we'll be building
+SKETCHLIBOBJS		:=	$(addsuffix .o,$(basename $(subst $(SKETCHBOOK),$(BUILDROOT),$(FILTEREDSRCS))))
+
+# add the basic libraries to the include path, leave out Desktop and utility stuff. 
+SKETCHLIBINCLUDES	:=	$(addprefix -I,$(SKETCHLIBS))
+
+# Library object files
+LIBOBJS			:=	$(SKETCHLIBOBJS)
+
+# The ELF file
+SKETCHELF		=	$(BUILDROOT)/$(SKETCH).elf
+
+# Map file
+SKETCHMAP		=	$(BUILDROOT)/$(SKETCH).map
+
+
+CORELIB			=
+
+# Sketch object files
+SKETCHOBJS		:=	$(subst $(SRCROOT),$(BUILDROOT),$(SKETCHSRCS)) $(SKETCHCPP)
+SKETCHOBJS		:=	$(addsuffix .o,$(basename $(SKETCHOBJS)))
+
+
+# list of all .obj file we might need to build, not matter where they are: 
+ALLOBJS			=	$(SKETCHOBJS) $(LIBOBJS) $(CORELIBOBJS)
+
+# All of the dependency files that may be generated  
+ALLDEPS			=	$(ALLOBJS:%.o=%.d)
+
+
+#Targets: 
+# classic build target:
+all:	$(SKETCHELF)
+
+# nuttx primary build target:
+build:	$(SKETCHELF)
+
+clean:
+	rm -fr $(BUILDROOT)
+	
+showsources:
+
+	@echo "SKETCHBOOK=$(SKETCHBOOK)"
+	@echo "SKETCHLIBS=$(SKETCHLIBS)"
+	@echo "SKETCHLIBSRCDIRS=$(SKETCHLIBSRCDIRS)"
+	@echo "SKETCHLIBSRCS=$(SKETCHLIBSRCS)"
+	@echo "SKETCHLIBINCLUDES=$(SKETCHLIBINCLUDES)"
+	@echo "SKETCHOBJS=$(SKETCHOBJS)"
+	@echo "LIBOBJS=$(LIBOBJS)"
+	@echo "CORELIB=$(CORELIB)"
+	@echo "ARDUINOLIBSRCS=$(ARDUINOLIBSRCS)"
+
+# common header for rules, prints what is being built
+define RULEHDR
+	echo %% $(subst $(BUILDROOT)/,,$@)
+	mkdir -p $(dir $@)
+endef
+
+# Link the final object 
+$(SKETCHELF):	$(SKETCHOBJS) $(LIBOBJS) $(CORELIB)
+	$(RULEHDR)
+	$(v)$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
+	echo Built $@
+	
+#
+# Build sketch objects
+#
+SKETCH_INCLUDES	=	$(SKETCHLIBINCLUDES) $(ARDUINOLIBINCLUDES) $(COREINCLUDES)
+
+$(BUILDROOT)/%.o: $(BUILDROOT)/%.cpp
+	$(RULEHDR)
+	$(v)$(CXX) $(CXXFLAGS) -c -o $@ $< -I$(SRCROOT) $(SKETCH_INCLUDES)
+
+$(BUILDROOT)/%.o: $(SRCROOT)/%.cpp
+	$(RULEHDR)
+	$(v)$(CXX) $(CXXFLAGS) -c -o $@ $< $(SKETCH_INCLUDES)
+
+$(BUILDROOT)/%.o: $(SRCROOT)/%.c
+	$(RULEHDR)
+	$(v)$(CC) $(CFLAGS) -c -o $@ $< $(SKETCH_INCLUDES)
+
+$(BUILDROOT)/%.o: $(SRCROOT)/%.S
+	$(RULEHDR)
+	$(v)$(AS) $(ASFLAGS) -c -o $@ $< $(SKETCH_INCLUDES)
+
+#
+# Build library objects from sources in the sketchbook
+#
+SLIB_INCLUDES	=	-I$(dir $<)/utility $(SKETCHLIBINCLUDES) $(ARDUINOLIBINCLUDES) $(COREINCLUDES)
+
+$(BUILDROOT)/libraries/%.o: $(SKETCHBOOK)/libraries/%.cpp
+	$(RULEHDR)
+	$(v)$(CXX) $(CXXFLAGS) -c -o $@ $< $(SLIB_INCLUDES)
+
+$(BUILDROOT)/libraries/%.o: $(SKETCHBOOK)/libraries/%.c
+	$(RULEHDR)
+	$(v)$(CC) $(CFLAGS) -c -o $@ $< $(SLIB_INCLUDES)
+
+$(BUILDROOT)/libraries/%.o: $(SKETCHBOOK)/libraries/%.S
+	$(RULEHDR)
+	$(v)$(AS) $(ASFLAGS) -c -o $@ $< $(SLIB_INCLUDES)
+
+
+
+
+INCLUDES := /Users/buzz/PX4/Firmware/apps/Corona/libraries/Desktop/include /Users/buzz/PX4/Firmware/nuttx/include  $(SKETCHLIBSRCDIRS)
 
 include $(APPDIR)/mk/app.mk
 
@@ -72,72 +236,15 @@ include $(APPDIR)/mk/app.mk
 TMPDIR			:=	/Users/buzz/PX4/Firmware/apps/Corona/tmp
 BUILDROOT		:=	$(abspath $(TMPDIR)/$(SKETCH).build)
 
-
-SKETCHLIBSRCDIRS= \
-/Users/buzz/PX4/Firmware/apps/Corona/ArduPlane \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/APM_OBC \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/APM_RC \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_ADC \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_AHRS \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Airspeed \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_AnalogSource \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Baro \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Camera \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Common \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Compass \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Declination \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_GPS \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_IMU \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_InertialSensor \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Math \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Mount \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_PeriodicProcess \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_RangeFinder \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Relay \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/Arduino_Mega_ISR_Registry \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/DataFlash \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/FastSerial \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/Filter \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/GCS_MAVLink \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/I2C \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/PID \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/RC_Channel \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/SITL \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/memcheck \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/Desktop/support \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/APM_OBC/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/APM_RC/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_ADC/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_AHRS/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Airspeed/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_AnalogSource/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Baro/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Camera/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Common/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Compass/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Declination/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_GPS/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_IMU/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_InertialSensor/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Math/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Mount/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_PeriodicProcess/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_RangeFinder/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/AP_Relay/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/Arduino_Mega_ISR_Registry/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/DataFlash/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/FastSerial/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/Filter/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/GCS_MAVLink/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/I2C/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/PID/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/RC_Channel/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/SITL/utility \
-/Users/buzz/PX4/Firmware/apps/Corona/libraries/memcheck/utility
-
-
 SKETCHLIBINCLUDES	:=	$(addprefix -I,$(SKETCHLIBSRCDIRS))
 SKETCH_INCLUDES	=	$(SKETCHLIBINCLUDES)
 
-CXXFLAGS := -D__AVR_ATmega2560__ -Wshadow  -I/Users/buzz/PX4/Firmware/apps/Corona/libraries/Desktop/include $(SKETCH_INCLUDES)  -DDESKTOP_BUILD=1
-#CXXFLAGS := -D__AVR_ATmega2560__  -DDESKTOP_BUILD=1
+OPTFLAGS := -Wall -Wextra -Wdouble-promotion -Wshadow -Wfloat-equal -Wframe-larger-than=1024 \
+-Wpointer-arith -Wlogical-op -Wmissing-declarations -Wpacked -Wno-unused-parameter \
+-Os -fno-strict-aliasing \
+-fno-strength-reduce -fomit-frame-pointer -funsafe-math-optimizations -fno-builtin-printf \
+-ffunction-sections -fdata-sections -g -mcpu=cortex-m4 -mthumb -march=armv7e-m \
+-mfpu=fpv4-sp-d16 -mfloat-abi=hard 
+
+CXXFLAGS := $(OPTFLAGS) -DSKETCH=\"$(SKETCH)\" -D__AVR_ATmega2560__ -Wshadow  -I/Users/buzz/PX4/Firmware/apps/Corona/libraries/Desktop/include $(SKETCH_INCLUDES)  -DDESKTOP_BUILD=1
+ASFLAGS  := $(OPTFLAGS) -DSKETCH=\"$(SKETCH)\"
