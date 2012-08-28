@@ -41,9 +41,8 @@
 #DESKTOP=$(PWD)/../libraries
 
 
-build: pre-build
-
-post-build: build
+#build: pre-build
+#post-build: build
 
 #clean:
 #	cd /Users/buzz/PX4/Firmware
