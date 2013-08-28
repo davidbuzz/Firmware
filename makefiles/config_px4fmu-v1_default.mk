@@ -54,6 +54,7 @@ MODULES		+= systemcmds/pwm
 MODULES		+= systemcmds/reboot
 MODULES		+= systemcmds/top
 MODULES		+= systemcmds/tests
+MODULES		+= systemcmds/auth
 MODULES		+= systemcmds/config
 MODULES		+= systemcmds/nshterm
 
@@ -99,6 +100,8 @@ MODULES		+= modules/systemlib/mixer
 MODULES		+= modules/mathlib
 MODULES		+= modules/mathlib/math/filter
 MODULES		+= modules/controllib
+MODULES		+= modules/libtomfastmath
+MODULES		+= modules/libtomcrypt
 MODULES		+= modules/uORB
 
 #
