@@ -80,7 +80,8 @@ static const int ERROR = -1;
 #define DIR_WRITE				(0<<7)
 #define ADDR_INCREMENT			(1<<6)
 
-
+#define LSM303D_DEVICE_PATH_ACCEL	"/dev/lsm303d_accel"
+#define LSM303D_DEVICE_PATH_MAG		"/dev/lsm303d_mag"
 
 /* register addresses: A: accel, M: mag, T: temp */
 #define ADDR_WHO_AM_I			0x0F
@@ -276,7 +277,7 @@ private:
 	unsigned		_mag_samplerate;
 
 	orb_advert_t		_accel_topic;
-	orb_advert_t		_mag_topic;
+	int			_class_instance;
 
 	unsigned		_accel_read;
 	unsigned		_mag_read;
@@ -286,6 +287,7 @@ private:
 	perf_counter_t		_reg7_resets;
 	perf_counter_t		_reg1_resets;
 	perf_counter_t		_extreme_values;
+	perf_counter_t		_accel_reschedules;
 
 	math::LowPassFilter2p	_accel_filter_x;
 	math::LowPassFilter2p	_accel_filter_y;
@@ -465,12 +467,17 @@ public:
 	virtual ssize_t			read(struct file *filp, char *buffer, size_t buflen);
 	virtual int			ioctl(struct file *filp, int cmd, unsigned long arg);
 
+	virtual int		init();
+
 protected:
 	friend class LSM303D;
 
 	void				parent_poll_notify();
 private:
 	LSM303D				*_parent;
+
+	orb_advert_t			_mag_topic;
+	int				_mag_class_instance;
 
 	void				measure();
 
@@ -493,7 +500,7 @@ LSM303D::LSM303D(int bus, const char* path, spi_dev_e device) :
 	_mag_range_scale(0.0f),
 	_mag_samplerate(0),
 	_accel_topic(-1),
-	_mag_topic(-1),
+	_class_instance(-1),
 	_accel_read(0),
 	_mag_read(0),
 	_accel_sample_perf(perf_alloc(PC_ELAPSED, "lsm303d_accel_read")),
@@ -501,6 +508,7 @@ LSM303D::LSM303D(int bus, const char* path, spi_dev_e device) :
 	_reg1_resets(perf_alloc(PC_COUNT, "lsm303d_reg1_resets")),
 	_reg7_resets(perf_alloc(PC_COUNT, "lsm303d_reg7_resets")),
 	_extreme_values(perf_alloc(PC_COUNT, "lsm303d_extremes")),
+	_accel_reschedules(perf_alloc(PC_COUNT, "lsm303d_accel_resched")),
 	_accel_filter_x(LSM303D_ACCEL_DEFAULT_RATE, LSM303D_ACCEL_DEFAULT_DRIVER_FILTER_FREQ),
 	_accel_filter_y(LSM303D_ACCEL_DEFAULT_RATE, LSM303D_ACCEL_DEFAULT_DRIVER_FILTER_FREQ),
 	_accel_filter_z(LSM303D_ACCEL_DEFAULT_RATE, LSM303D_ACCEL_DEFAULT_DRIVER_FILTER_FREQ),
@@ -543,6 +551,9 @@ LSM303D::~LSM303D()
 	if (_mag_reports != nullptr)
 		delete _mag_reports;
 
+	if (_class_instance != -1)
+		unregister_class_devname(ACCEL_DEVICE_PATH, _class_instance);
+
 	delete _mag;
 
 	/* delete the perf counter */
@@ -572,10 +583,6 @@ LSM303D::init()
 		goto out;
 
 	/* advertise accel topic */
-	struct accel_report zero_report;
-	memset(&zero_report, 0, sizeof(zero_report));
-	_accel_topic = orb_advertise(ORB_ID(sensor_accel), &zero_report);
-
 	_mag_reports = new RingBuffer(2, sizeof(mag_report));
 
 	if (_mag_reports == nullptr)
@@ -583,19 +590,22 @@ LSM303D::init()
 
 	reset();
 
-	/* advertise mag topic */
-	struct mag_report zero_mag_report;
-	memset(&zero_mag_report, 0, sizeof(zero_mag_report));
-	_mag_topic = orb_advertise(ORB_ID(sensor_mag), &zero_mag_report);
-
-	/* do CDev init for the mag device node, keep it optional */
-	mag_ret = _mag->init();
-
-	if (mag_ret != OK) {
-		_mag_topic = -1;
+	/* do CDev init for the mag device node */
+	ret = _mag->init();
+	if (ret != OK) {
+		warnx("MAG init failed");
+		goto out;
 	}
 
-	ret = OK;
+	_class_instance = register_class_devname(ACCEL_DEVICE_PATH);
+	if (_class_instance == CLASS_DEVICE_PRIMARY) {
+		// we are the primary accel device, so advertise to
+		// the ORB
+		struct accel_report zero_report;
+		memset(&zero_report, 0, sizeof(zero_report));
+		_accel_topic = orb_advertise(ORB_ID(sensor_accel), &zero_report);
+	}
+
 out:
 	return ret;
 }
@@ -627,11 +637,18 @@ LSM303D::reset()
 	_reg7_expected = REG7_CONT_MODE_M;
 	write_reg(ADDR_CTRL_REG7, _reg7_expected);
 	write_reg(ADDR_CTRL_REG5, REG5_RES_HIGH_M);
+	write_reg(ADDR_CTRL_REG3, 0x04); // DRDY on ACCEL on INT1
+	write_reg(ADDR_CTRL_REG4, 0x04); // DRDY on MAG on INT2
 
 	accel_set_range(LSM303D_ACCEL_DEFAULT_RANGE_G);
 	accel_set_samplerate(LSM303D_ACCEL_DEFAULT_RATE);
 	accel_set_driver_lowpass_filter((float)LSM303D_ACCEL_DEFAULT_RATE, (float)LSM303D_ACCEL_DEFAULT_DRIVER_FILTER_FREQ);
-	accel_set_onchip_lowpass_filter_bandwidth(0); // this gives 773Hz
+
+	// we setup the anti-alias on-chip filter as 50Hz. We believe
+	// this operates in the analog domain, and is critical for
+	// anti-aliasing. The 2 pole software filter is designed to
+	// operate in conjunction with this on-chip filter
+	accel_set_onchip_lowpass_filter_bandwidth(LSM303D_ACCEL_DEFAULT_ONCHIP_FILTER_FREQ);
 
 	mag_set_range(LSM303D_MAG_DEFAULT_RANGE_GA);
 	mag_set_samplerate(LSM303D_MAG_DEFAULT_RATE);
@@ -1424,6 +1441,14 @@ LSM303D::mag_measure_trampoline(void *arg)
 void
 LSM303D::measure()
 {
+	// if the accel doesn't have any data ready then re-schedule
+	// for 100 microseconds later. This ensures we don't double
+	// read a value and then miss the next value
+	if (stm32_gpioread(GPIO_EXTI_ACCEL_DRDY) == 0) {
+		perf_count(_accel_reschedules);
+		hrt_call_delay(&_accel_call, 100);
+		return;
+	}
 	if (read_reg(ADDR_CTRL_REG1) != _reg1_expected) {
 		perf_count(_reg1_resets);
 		reset();
@@ -1491,8 +1516,10 @@ LSM303D::measure()
 	/* notify anyone waiting for data */
 	poll_notify(POLLIN);
 
-	/* publish for subscribers */
-	orb_publish(ORB_ID(sensor_accel), _accel_topic, &accel_report);
+	if (_accel_topic != -1) {
+		/* publish for subscribers */
+		orb_publish(ORB_ID(sensor_accel), _accel_topic, &accel_report);
+	}
 
 	_accel_read++;
 
@@ -1563,8 +1590,10 @@ LSM303D::mag_measure()
 	/* notify anyone waiting for data */
 	poll_notify(POLLIN);
 
-	/* publish for subscribers */
-	orb_publish(ORB_ID(sensor_mag), _mag_topic, &mag_report);
+	if (_mag->_mag_topic != -1) {
+		/* publish for subscribers */
+		orb_publish(ORB_ID(sensor_mag), _mag->_mag_topic, &mag_report);
+	}
 
 	_mag_read++;
 
@@ -1590,6 +1619,8 @@ LSM303D::print_registers()
 		const char *name;
 	} regmap[] = {
 		{ ADDR_WHO_AM_I,    "WHO_AM_I" },
+		{ 0x02,             "I2C_CONTROL1" },
+		{ 0x15,             "I2C_CONTROL2" },
 		{ ADDR_STATUS_A,    "STATUS_A" },
 		{ ADDR_STATUS_M,    "STATUS_M" },
 		{ ADDR_CTRL_REG0,   "CTRL_REG0" },
@@ -1652,13 +1683,39 @@ LSM303D::toggle_logging()
 }
 
 LSM303D_mag::LSM303D_mag(LSM303D *parent) :
-	CDev("LSM303D_mag", MAG_DEVICE_PATH),
-	_parent(parent)
+	CDev("LSM303D_mag", LSM303D_DEVICE_PATH_MAG),
+	_parent(parent),
+	_mag_topic(-1),
+	_mag_class_instance(-1)
 {
 }
 
 LSM303D_mag::~LSM303D_mag()
 {
+	if (_mag_class_instance != -1)
+		unregister_class_devname(MAG_DEVICE_PATH, _mag_class_instance);
+}
+
+int
+LSM303D_mag::init()
+{
+	int ret;
+
+	ret = CDev::init();
+	if (ret != OK)
+		goto out;
+
+	_mag_class_instance = register_class_devname(MAG_DEVICE_PATH);
+	if (_mag_class_instance == CLASS_DEVICE_PRIMARY) {
+		// we are the primary mag device, so advertise to
+		// the ORB
+		struct mag_report zero_report;
+		memset(&zero_report, 0, sizeof(zero_report));
+		_mag_topic = orb_advertise(ORB_ID(sensor_mag), &zero_report);
+	}
+
+out:
+	return ret;
 }
 
 void
@@ -1718,7 +1775,7 @@ start()
 		errx(0, "already started");
 
 	/* create the driver */
-	g_dev = new LSM303D(1 /* XXX magic number */, ACCEL_DEVICE_PATH, (spi_dev_e)PX4_SPIDEV_ACCEL_MAG);
+	g_dev = new LSM303D(1 /* SPI dev 1 */, LSM303D_DEVICE_PATH_ACCEL, (spi_dev_e)PX4_SPIDEV_ACCEL_MAG);
 
 	if (g_dev == nullptr) {
 		warnx("failed instantiating LSM303D obj");
@@ -1729,7 +1786,7 @@ start()
 		goto fail;
 
 	/* set the poll rate to default, starts automatic data collection */
-	fd = open(ACCEL_DEVICE_PATH, O_RDONLY);
+	fd = open(LSM303D_DEVICE_PATH_ACCEL, O_RDONLY);
 
 	if (fd < 0)
 		goto fail;
@@ -1737,7 +1794,7 @@ start()
 	if (ioctl(fd, SENSORIOCSPOLLRATE, SENSOR_POLLRATE_DEFAULT) < 0)
 		goto fail;
 
-	fd_mag = open(MAG_DEVICE_PATH, O_RDONLY);
+	fd_mag = open(LSM303D_DEVICE_PATH_MAG, O_RDONLY);
 
 	/* don't fail if open cannot be opened */
 	if (0 <= fd_mag) {
@@ -1746,6 +1803,8 @@ start()
 		}
 	}
 
+        close(fd);
+        close(fd_mag);
 
 	exit(0);
 fail:
@@ -1772,10 +1831,10 @@ test()
 	int ret;
 
 	/* get the driver */
-	fd_accel = open(ACCEL_DEVICE_PATH, O_RDONLY);
+	fd_accel = open(LSM303D_DEVICE_PATH_ACCEL, O_RDONLY);
 
 	if (fd_accel < 0)
-		err(1, "%s open failed", ACCEL_DEVICE_PATH);
+		err(1, "%s open failed", LSM303D_DEVICE_PATH_ACCEL);
 
 	/* do a simple demand read */
 	sz = read(fd_accel, &accel_report, sizeof(accel_report));
@@ -1801,10 +1860,10 @@ test()
 	struct mag_report m_report;
 
 	/* get the driver */
-	fd_mag = open(MAG_DEVICE_PATH, O_RDONLY);
+	fd_mag = open(LSM303D_DEVICE_PATH_MAG, O_RDONLY);
 
 	if (fd_mag < 0)
-		err(1, "%s open failed", MAG_DEVICE_PATH);
+		err(1, "%s open failed", LSM303D_DEVICE_PATH_MAG);
 
 	/* check if mag is onboard or external */
 	if ((ret = ioctl(fd_mag, MAGIOCGEXTERNAL, 0)) < 0)
@@ -1827,6 +1886,9 @@ test()
 
 	/* XXX add poll-rate tests here too */
 
+        close(fd_accel);
+        close(fd_mag);
+
 	reset();
 	errx(0, "PASS");
 }
@@ -1837,7 +1899,7 @@ test()
 void
 reset()
 {
-	int fd = open(ACCEL_DEVICE_PATH, O_RDONLY);
+	int fd = open(LSM303D_DEVICE_PATH_ACCEL, O_RDONLY);
 
 	if (fd < 0)
 		err(1, "failed ");
@@ -1848,7 +1910,9 @@ reset()
 	if (ioctl(fd, SENSORIOCSPOLLRATE, SENSOR_POLLRATE_DEFAULT) < 0)
 		err(1, "accel pollrate reset failed");
 
-	fd = open(MAG_DEVICE_PATH, O_RDONLY);
+        close(fd);
+
+	fd = open(LSM303D_DEVICE_PATH_MAG, O_RDONLY);
 
 	if (fd < 0) {
 		warnx("mag could not be opened, external mag might be used");
@@ -1857,6 +1921,8 @@ reset()
 		if (ioctl(fd, SENSORIOCSPOLLRATE, SENSOR_POLLRATE_DEFAULT) < 0)
 			err(1, "mag pollrate reset failed");
 	}
+
+        close(fd);
 
 	exit(0);
 }
