@@ -1,5 +1,5 @@
 ############################################################################
-# configs/px4fmu-v1/nsh/Make.defs
+# configs/quanton/nsh/Make.defs
 #
 #   Copyright (C) 2011 Gregory Nutt. All rights reserved.
 #   Author: Gregory Nutt <gnutt@nuttx.org>

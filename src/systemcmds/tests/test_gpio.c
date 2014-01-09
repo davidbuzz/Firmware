@@ -87,10 +87,13 @@
  * Name: test_gpio
  ****************************************************************************/
 
+
 int test_gpio(int argc, char *argv[])
 {
-	int		fd;
 	int		ret = 0;
+
+#if CONFIG_HAL_BOARD != HAL_BOARD_Quanton  // no IO board on a quanton.
+	int		fd;
 
 	fd = open(PX4IO_DEVICE_PATH, 0);
 
@@ -108,8 +111,11 @@ int test_gpio(int argc, char *argv[])
 
 	/* Go back to default */
 	ioctl(fd, GPIO_RESET, ~0);
+#endif	
 
 	printf("\t GPIO test successful.\n");
 
+
 	return ret;
 }
+
