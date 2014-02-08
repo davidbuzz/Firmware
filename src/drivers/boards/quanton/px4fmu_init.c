@@ -254,7 +254,7 @@ __EXPORT int nsh_archinitialize(void)
 	message("[boot] Successfully initialized SPI port 3\n");
 
 	/* Now bind the SPI interface to the MMCSD driver */
-	result = mmcsd_spislotinitialize(CONFIG_NSH_MMCSDMINOR, CONFIG_NSH_MMCSDSLOTNO, spi3);
+	// result = mmcsd_spislotinitialize(CONFIG_NSH_MMCSDMINOR, CONFIG_NSH_MMCSDSLOTNO, spi3);  BUZZ TODO REPLACE MMC-SDCARD WITH SOMETHING ELSE? 
 
 	if (result != OK) {
 		message("[boot] FAILED to bind SPI port 3 to the MMCSD driver\n");
