@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2012-2013 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2012-2014 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -90,6 +90,7 @@ static const int ERROR = -1;
 /* internal conversion time: 9.17 ms, so should not be read at rates higher than 100 Hz */
 #define MS5611_CONVERSION_INTERVAL	10000	/* microseconds */
 #define MS5611_MEASUREMENT_RATIO	3	/* pressure measurements per temperature measurement */
+#define MS5611_BARO_DEVICE_PATH		"/dev/ms5611"
 
 class MS5611 : public device::CDev
 {
@@ -124,11 +125,18 @@ protected:
 	int32_t			_TEMP;
 	int64_t			_OFF;
 	int64_t			_SENS;
+	float			_P;
+	float			_T;
+	float			_Alt;
+	uint32_t                _D1;
+	uint32_t                _D2;
 
 	/* altitude conversion calibration */
 	unsigned		_msl_pressure;	/* in kPa */
 
 	orb_advert_t		_baro_topic;
+
+	int			_class_instance;
 
 	perf_counter_t		_sample_perf;
 	perf_counter_t		_measure_perf;
@@ -190,7 +198,7 @@ protected:
 extern "C" __EXPORT int ms5611_main(int argc, char *argv[]);
 
 MS5611::MS5611(device::Device *interface, ms5611::prom_u &prom_buf) :
-	CDev("MS5611", BARO_DEVICE_PATH),
+	CDev("MS5611", MS5611_BARO_DEVICE_PATH),
 	_interface(interface),
 	_prom(prom_buf.s),
 	_measure_ticks(0),
@@ -202,6 +210,7 @@ MS5611::MS5611(device::Device *interface, ms5611::prom_u &prom_buf) :
 	_SENS(0),
 	_msl_pressure(101325),
 	_baro_topic(-1),
+	_class_instance(-1),
 	_sample_perf(perf_alloc(PC_ELAPSED, "ms5611_read")),
 	_measure_perf(perf_alloc(PC_ELAPSED, "ms5611_measure")),
 	_comms_errors(perf_alloc(PC_COUNT, "ms5611_comms_errors")),
@@ -218,6 +227,9 @@ MS5611::~MS5611()
 {
 	/* make sure we are truly inactive */
 	stop_cycle();
+
+	if (_class_instance != -1)
+		unregister_class_devname(MS5611_BARO_DEVICE_PATH, _class_instance);
 
 	/* free any existing reports */
 	if (_reports != nullptr)
@@ -252,18 +264,57 @@ MS5611::init()
 		goto out;
 	}
 
-	/* get a publish handle on the baro topic */
-	struct baro_report zero_report;
-	memset(&zero_report, 0, sizeof(zero_report));
-	_baro_topic = orb_advertise(ORB_ID(sensor_baro), &zero_report);
+	/* register alternate interfaces if we have to */
+	_class_instance = register_class_devname(BARO_DEVICE_PATH);
 
-	if (_baro_topic < 0) {
-		debug("failed to create sensor_baro object");
-		ret = -ENOSPC;
-		goto out;
-	}
+	struct baro_report brp;
+	/* do a first measurement cycle to populate reports with valid data */
+	_measure_phase = 0;
+	_reports->flush();
 
-	ret = OK;
+	/* this do..while is goto without goto */
+	do {
+		/* do temperature first */
+		if (OK != measure()) {
+			ret = -EIO;
+			break;
+		}
+
+		usleep(MS5611_CONVERSION_INTERVAL);
+
+		if (OK != collect()) {
+			ret = -EIO;
+			break;
+		}
+
+		/* now do a pressure measurement */
+		if (OK != measure()) {
+			ret = -EIO;
+			break;
+		}
+
+		usleep(MS5611_CONVERSION_INTERVAL);
+
+		if (OK != collect()) {
+			ret = -EIO;
+			break;
+		}
+
+		/* state machine will have generated a report, copy it out */
+		_reports->get(&brp);
+
+		ret = OK;
+
+		if (_class_instance == CLASS_DEVICE_PRIMARY) {
+
+			_baro_topic = orb_advertise(ORB_ID(sensor_baro), &brp);
+
+			if (_baro_topic < 0)
+				debug("failed to create sensor_baro publication");
+		}
+
+	} while (0);
+
 out:
 	return ret;
 }
@@ -423,8 +474,11 @@ MS5611::ioctl(struct file *filp, int cmd, unsigned long arg)
 		return _reports->size();
 
 	case SENSORIOCRESET:
-		/* XXX implement this */
-		return -EINVAL;
+		/*
+		 * Since we are initialized, we do not need to do anything, since the
+		 * PROM is correctly read and the part does not need to be configured.
+		 */
+		return OK;
 
 	case BAROIOCSMSLPRESSURE:
 
@@ -586,6 +640,17 @@ MS5611::collect()
 		return ret;
 	}
 
+	// report the raw D1/D2 values to help diagnose problems with
+	// transfers at higher temperatures
+	if (_measure_phase == 0) {
+		_D1 = raw;
+	} else {
+		_D2 = raw;
+	}
+
+        report.ms5611_D1 = _D1;
+        report.ms5611_D2 = _D2;
+
 	/* handle a measurement */
 	if (_measure_phase == 0) {
 
@@ -623,6 +688,8 @@ MS5611::collect()
 
 		/* pressure calculation, result in Pa */
 		int32_t P = (((raw * _SENS) >> 21) - _OFF) >> 15;
+		_P = P * 0.01f;
+		_T = _TEMP * 0.01f;
 
 		/* generate a new report */
 		report.temperature = _TEMP / 100.0f;
@@ -664,9 +731,13 @@ MS5611::collect()
 		 *                   a
 		 */
 		report.altitude = (((pow((p / p1), (-(a * R) / g))) * T1) - T1) / a;
+		_Alt = report.altitude;
 
 		/* publish it */
-		orb_publish(ORB_ID(sensor_baro), _baro_topic, &report);
+		if (_baro_topic > 0 && !(_pub_blocked)) {
+			/* publish it */
+			orb_publish(ORB_ID(sensor_baro), _baro_topic, &report);
+		}
 
 		if (_reports->force(&report)) {
 			perf_count(_buffer_overflows);
@@ -695,6 +766,9 @@ MS5611::print_info()
 	printf("TEMP:           %d\n", _TEMP);
 	printf("SENS:           %lld\n", _SENS);
 	printf("OFF:            %lld\n", _OFF);
+	printf("P:              %.3f\n", _P);
+	printf("T:              %.3f\n", _T);
+	printf("alt:            %.3f\n", _Alt);
 	printf("MSL pressure:   %10.4f\n", (double)(_msl_pressure / 100.f));
 
 	printf("factory_setup             %u\n", _prom.factory_setup);
@@ -717,6 +791,7 @@ MS5611	*g_dev;
 
 void	start();
 void	test();
+void	test2();
 void	reset();
 void	info();
 void	calibrate(unsigned altitude);
@@ -806,7 +881,7 @@ start()
 		goto fail;
 
 	/* set the poll rate to default, starts automatic data collection */
-	fd = open(BARO_DEVICE_PATH, O_RDONLY);
+	fd = open(MS5611_BARO_DEVICE_PATH, O_RDONLY);
 	if (fd < 0) {
 		warnx("can't open baro device");
 		goto fail;
@@ -840,10 +915,10 @@ test()
 	ssize_t sz;
 	int ret;
 
-	int fd = open(BARO_DEVICE_PATH, O_RDONLY);
+	int fd = open(MS5611_BARO_DEVICE_PATH, O_RDONLY);
 
 	if (fd < 0)
-		err(1, "%s open failed (try 'ms5611 start' if the driver is not running)", BARO_DEVICE_PATH);
+		err(1, "%s open failed (try 'ms5611 start' if the driver is not running)", MS5611_BARO_DEVICE_PATH);
 
 	/* do a simple demand read */
 	sz = read(fd, &report, sizeof(report));
@@ -894,12 +969,88 @@ test()
 }
 
 /**
+ * Perform some basic functional tests on the driver;
+ * make sure we can collect data from the sensor in polled
+ * and automatic modes.
+ */
+void
+test2()
+{
+	struct baro_report report;
+	ssize_t sz;
+	int ret;
+
+	int fd = open(BARO_DEVICE_PATH, O_RDONLY);
+
+	if (fd < 0)
+		err(1, "%s open failed (try 'ms5611 start' if the driver is not running)", BARO_DEVICE_PATH);
+
+	/* set the queue depth to 20 */
+	if (OK != ioctl(fd, SENSORIOCSQUEUEDEPTH, 20))
+		errx(1, "failed to set queue depth");
+
+	/* start the sensor polling at max speed */
+	if (OK != ioctl(fd, SENSORIOCSPOLLRATE, SENSOR_POLLRATE_MAX))
+		errx(1, "failed to set 2Hz poll rate");
+
+        hrt_abstime last_report = hrt_absolute_time();
+        uint32_t last_D1=0, last_D2=0;
+
+	/* read the sensor for 5 mins, reporting large D1 jumps and data at 1Hz */
+        while (true) {
+		struct pollfd fds;
+
+		/* wait for data to be ready */
+		fds.fd = fd;
+		fds.events = POLLIN;
+		ret = poll(&fds, 1, 2000);
+
+		if (ret != 1)
+			errx(1, "timed out waiting for sensor data");
+
+		/* now go get it */
+		sz = read(fd, &report, sizeof(report));
+
+		if (sz != sizeof(report))
+			err(1, "periodic read failed");
+
+                int32_t d1_diff = abs((int32_t)last_D1 - (int32_t)report.ms5611_D1);
+                if (last_D1 != 0 && d1_diff >= 0x10000) {
+                    printf("jump D1=0x%08x/0x%08x D2=0x%08x/0x%08x\n", 
+                           (unsigned)last_D1, (unsigned)report.ms5611_D1,
+                           (unsigned)last_D2, (unsigned)report.ms5611_D2);
+                }
+
+                if (hrt_elapsed_time(&last_report) >= 1000*1000) {
+                    printf("temp %u press %u D1=0x%08x D2=0x%08x alt=%u\n", 
+                           (unsigned)(report.temperature*100.0),
+                           (unsigned)(report.pressure*1000.0),
+                           (unsigned)report.ms5611_D1,
+                           (unsigned)report.ms5611_D2,
+                           (unsigned)report.altitude);
+                    last_report = hrt_absolute_time();
+                }
+                last_D1 = report.ms5611_D1;
+                last_D2 = report.ms5611_D2;
+
+		fds.fd = 0;
+		fds.events = POLLIN;
+		if (poll(&fds, 1, 0) == 1) {
+                    // user input
+                    break;
+                }                
+	}
+
+	errx(0, "PASS");
+}
+
+/**
  * Reset the driver.
  */
 void
 reset()
 {
-	int fd = open(BARO_DEVICE_PATH, O_RDONLY);
+	int fd = open(MS5611_BARO_DEVICE_PATH, O_RDONLY);
 
 	if (fd < 0)
 		err(1, "failed ");
@@ -938,10 +1089,10 @@ calibrate(unsigned altitude)
 	float	pressure;
 	float	p1;
 
-	int fd = open(BARO_DEVICE_PATH, O_RDONLY);
+	int fd = open(MS5611_BARO_DEVICE_PATH, O_RDONLY);
 
 	if (fd < 0)
-		err(1, "%s open failed (try 'ms5611 start' if the driver is not running)", BARO_DEVICE_PATH);
+		err(1, "%s open failed (try 'ms5611 start' if the driver is not running)", MS5611_BARO_DEVICE_PATH);
 
 	/* start the sensor polling at max */
 	if (OK != ioctl(fd, SENSORIOCSPOLLRATE, SENSOR_POLLRATE_MAX))
@@ -1012,6 +1163,12 @@ ms5611_main(int argc, char *argv[])
 	 */
 	if (!strcmp(argv[1], "test"))
 		ms5611::test();
+
+	/*
+	 * Test the driver/device for 300 seconds
+	 */
+	if (!strcmp(argv[1], "test2"))
+		ms5611::test2();
 
 	/*
 	 * Reset the driver.

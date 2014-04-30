@@ -47,11 +47,12 @@
 #include <mathlib/mathlib.h>
 #include <controllib/blocks.hpp>
 #include <controllib/block/BlockParam.hpp>
-#include <controllib/uorb/UOrbSubscription.hpp>
-#include <controllib/uorb/UOrbPublication.hpp>
+#include <uORB/Subscription.hpp>
+#include <uORB/Publication.hpp>
 
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/vehicle_global_position.h>
+#include <uORB/topics/vehicle_local_position.h>
 #include <uORB/topics/sensor_combined.h>
 #include <uORB/topics/vehicle_gps_position.h>
 #include <uORB/topics/parameter_update.h>
@@ -124,30 +125,26 @@ public:
 	virtual void updateParams();
 protected:
 	// kalman filter
-	math::Matrix F;             /**< Jacobian(f,x), where dx/dt = f(x,u) */
-	math::Matrix G;             /**< noise shaping matrix for gyro/accel */
-	math::Matrix P;             /**< state covariance matrix */
-	math::Matrix P0;            /**< initial state covariance matrix */
-	math::Matrix V;             /**< gyro/ accel noise matrix */
-	math::Matrix HAtt;          /**< attitude measurement matrix */
-	math::Matrix RAtt;          /**< attitude measurement noise matrix */
-	math::Matrix HPos;          /**< position measurement jacobian matrix */
-	math::Matrix RPos;          /**< position measurement noise matrix */
+	math::Matrix<9,9> F;             /**< Jacobian(f,x), where dx/dt = f(x,u) */
+	math::Matrix<9,6> G;             /**< noise shaping matrix for gyro/accel */
+	math::Matrix<9,9> P;             /**< state covariance matrix */
+	math::Matrix<9,9> P0;            /**< initial state covariance matrix */
+	math::Matrix<6,6> V;             /**< gyro/ accel noise matrix */
+	math::Matrix<4,9> HAtt;          /**< attitude measurement matrix */
+	math::Matrix<4,4> RAtt;          /**< attitude measurement noise matrix */
+	math::Matrix<6,9> HPos;          /**< position measurement jacobian matrix */
+	math::Matrix<6,6> RPos;          /**< position measurement noise matrix */
 	// attitude
-	math::Dcm C_nb;             /**< direction cosine matrix from body to nav frame */
+	math::Matrix<3,3> C_nb;             /**< direction cosine matrix from body to nav frame */
 	math::Quaternion q;         /**< quaternion from body to nav frame */
 	// subscriptions
-	control::UOrbSubscription<sensor_combined_s> _sensors;          /**< sensors sub. */
-	control::UOrbSubscription<vehicle_gps_position_s> _gps;         /**< gps sub. */
-	control::UOrbSubscription<parameter_update_s> _param_update;    /**< parameter update sub. */
+	uORB::Subscription<sensor_combined_s> _sensors;          /**< sensors sub. */
+	uORB::Subscription<vehicle_gps_position_s> _gps;         /**< gps sub. */
+	uORB::Subscription<parameter_update_s> _param_update;    /**< parameter update sub. */
 	// publications
-	control::UOrbPublication<vehicle_global_position_s> _pos;       /**< position pub. */
-	control::UOrbPublication<vehicle_attitude_s> _att;              /**< attitude pub. */
-
-	int			_accel_sub;		/**< Accelerometer subscription */
-	int			_gyro_sub;		/**< Gyroscope subscription */
-	int			_mag_sub;		/**< Magnetometer subscription */
-
+	uORB::Publication<vehicle_global_position_s> _pos;       /**< position pub. */
+	uORB::Publication<vehicle_local_position_s> _localPos;   /**< local position pub. */
+	uORB::Publication<vehicle_attitude_s> _att;              /**< attitude pub. */
 	// time stamps
 	uint64_t _pubTimeStamp;     /**< output data publication time stamp */
 	uint64_t _predictTimeStamp; /**< prediction time stamp */
@@ -164,21 +161,23 @@ protected:
 	float phi, theta, psi;                  /**< 3-2-1 euler angles */
 	float vN, vE, vD;                       /**< navigation velocity, m/s */
 	double lat, lon;                   	/**< lat, lon radians */
-	float alt;                   		/**< altitude, meters */
 	// parameters
-	control::BlockParam<float> _vGyro;      /**< gyro process noise */
-	control::BlockParam<float> _vAccel;     /**< accelerometer process noise  */
-	control::BlockParam<float> _rMag;       /**< magnetometer measurement noise  */
-	control::BlockParam<float> _rGpsVel;    /**< gps velocity measurement noise */
-	control::BlockParam<float> _rGpsPos;    /**< gps position measurement noise */
-	control::BlockParam<float> _rGpsAlt;    /**< gps altitude measurement noise */
-	control::BlockParam<float> _rPressAlt;  /**< press altitude measurement noise */
-	control::BlockParam<float> _rAccel;     /**< accelerometer measurement noise */
-	control::BlockParam<float> _magDip;     /**< magnetic inclination with level */
-	control::BlockParam<float> _magDec;     /**< magnetic declination, clockwise rotation */
-	control::BlockParam<float> _g;          /**< gravitational constant */
-	control::BlockParam<float> _faultPos;   /**< fault detection threshold for position */
-	control::BlockParam<float> _faultAtt;   /**< fault detection threshold for attitude */
+	float alt;                   		/**< altitude, meters */
+	double lat0, lon0;                   	/**< reference latitude and longitude */
+	float alt0;                   		/**<  refeerence altitude (ground height) */
+	control::BlockParamFloat _vGyro;      /**< gyro process noise */
+	control::BlockParamFloat _vAccel;     /**< accelerometer process noise  */
+	control::BlockParamFloat _rMag;       /**< magnetometer measurement noise  */
+	control::BlockParamFloat _rGpsVel;    /**< gps velocity measurement noise */
+	control::BlockParamFloat _rGpsPos;    /**< gps position measurement noise */
+	control::BlockParamFloat _rGpsAlt;    /**< gps altitude measurement noise */
+	control::BlockParamFloat _rPressAlt;  /**< press altitude measurement noise */
+	control::BlockParamFloat _rAccel;     /**< accelerometer measurement noise */
+	control::BlockParamFloat _magDip;     /**< magnetic inclination with level */
+	control::BlockParamFloat _magDec;     /**< magnetic declination, clockwise rotation */
+	control::BlockParamFloat _g;          /**< gravitational constant */
+	control::BlockParamFloat _faultPos;   /**< fault detection threshold for position */
+	control::BlockParamFloat _faultAtt;   /**< fault detection threshold for attitude */
 	// status
 	bool _attitudeInitialized;
 	bool _positionInitialized;

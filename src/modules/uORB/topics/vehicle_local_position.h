@@ -70,13 +70,18 @@ struct vehicle_local_position_s
 	/* Heading */
 	float yaw;
 	/* Reference position in GPS / WGS84 frame */
-	bool global_xy;			/**< true if position (x, y) is valid and has valid global reference (ref_lat, ref_lon) */
-	bool global_z;			/**< true if z is valid and has valid global reference (ref_alt) */
+	bool xy_global;			/**< true if position (x, y) is valid and has valid global reference (ref_lat, ref_lon) */
+	bool z_global;			/**< true if z is valid and has valid global reference (ref_alt) */
 	uint64_t ref_timestamp;	/**< Time when reference position was set */
 	int32_t ref_lat;		/**< Reference point latitude in 1E7 degrees */
 	int32_t ref_lon;		/**< Reference point longitude in 1E7 degrees */
 	float ref_alt;			/**< Reference altitude AMSL in meters, MUST be set to current (not at reference point!) ground level */
 	bool landed;			/**< true if vehicle is landed */
+	/* Distance to surface */
+	float dist_bottom;		/**< Distance to bottom surface (ground) */
+	float dist_bottom_rate;		/**< Distance to bottom surface (ground) change rate */
+	uint64_t surface_bottom_timestamp;		/**< Time when new bottom surface found */
+	bool dist_bottom_valid;	/**< true if distance to bottom surface is valid */
 };
 
 /**

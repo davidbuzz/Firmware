@@ -50,6 +50,9 @@
 #       Currently only used for informational purposes.
 #
 
+# for python2.7 compatibility
+from __future__ import print_function
+
 import sys
 import argparse
 import binascii
@@ -154,6 +157,8 @@ class uploader(object):
         PROG_MULTI      = b'\x27'
         READ_MULTI      = b'\x28'     # rev2 only
         GET_CRC         = b'\x29'     # rev3+
+        GET_OTP         = b'\x2a'     # rev4+  , get a word from OTP area
+        GET_SN          = b'\x2b'     # rev4+  , get a word from SN area
         REBOOT          = b'\x30'
         
         INFO_BL_REV     = b'\x01'        # bootloader protocol revision
@@ -175,6 +180,8 @@ class uploader(object):
         def __init__(self, portname, baudrate):
                 # open the port, keep the default timeout short so we can poll quickly
                 self.port = serial.Serial(portname, baudrate, timeout=0.5)
+                self.otp = b''
+                self.sn = b''
 
         def close(self):
                 if self.port is not None:
@@ -234,6 +241,22 @@ class uploader(object):
         def __getInfo(self, param):
                 self.__send(uploader.GET_DEVICE + param + uploader.EOC)
                 value = self.__recv_int()
+                self.__getSync()
+                return value
+
+        # send the GET_OTP command and wait for an info parameter
+        def __getOTP(self, param):
+                t = struct.pack("I", param) # int param as 32bit ( 4 byte ) char array.
+                self.__send(uploader.GET_OTP + t + uploader.EOC)
+                value = self.__recv(4)
+                self.__getSync()
+                return value
+
+        # send the GET_OTP command and wait for an info parameter
+        def __getSN(self, param):
+                t = struct.pack("I", param) # int param as 32bit ( 4 byte ) char array.
+                self.__send(uploader.GET_SN + t + uploader.EOC)
+                value = self.__recv(4)
                 self.__getSync()
                 return value
 
@@ -353,6 +376,35 @@ class uploader(object):
                 if self.fw_maxsize < fw.property('image_size'):
                         raise RuntimeError("Firmware image is too large for this board")
 
+                # OTP added in v4:
+                if self.bl_rev > 3:
+                    for byte in range(0,32*6,4):
+                        x = self.__getOTP(byte)
+                        self.otp  = self.otp + x
+                        print(binascii.hexlify(x).decode('Latin-1') + ' ', end='')
+                    # see src/modules/systemlib/otp.h in px4 code:
+                    self.otp_id = self.otp[0:4]
+                    self.otp_idtype = self.otp[4:5]
+                    self.otp_vid = self.otp[8:4:-1]
+                    self.otp_pid = self.otp[12:8:-1]
+                    self.otp_coa = self.otp[32:160]
+                    # show user:
+                    try:
+                            print("type: " + self.otp_id.decode('Latin-1'))
+                            print("idtype: " + binascii.b2a_qp(self.otp_idtype).decode('Latin-1'))
+                            print("vid: " + binascii.hexlify(self.otp_vid).decode('Latin-1'))
+                            print("pid: "+ binascii.hexlify(self.otp_pid).decode('Latin-1'))
+                            print("coa: "+ binascii.b2a_base64(self.otp_coa).decode('Latin-1'))
+                            print("sn: ", end='')
+                            for byte in range(0,12,4):
+                                    x = self.__getSN(byte)
+                                    x = x[::-1]  # reverse the bytes
+                                    self.sn  = self.sn + x
+                                    print(binascii.hexlify(x).decode('Latin-1'), end='') # show user
+                            print('')
+                    except Exception:
+                            # ignore bad character encodings
+                            pass
                 print("erase...")
                 self.__erase()
 
@@ -370,14 +422,17 @@ class uploader(object):
                 self.port.close()
                 
         def send_reboot(self):
-                # try reboot via NSH first
-                self.__send(uploader.NSH_INIT)
-                self.__send(uploader.NSH_REBOOT_BL)
-                self.__send(uploader.NSH_INIT)
-                self.__send(uploader.NSH_REBOOT)
-                # then try MAVLINK command
-                self.__send(uploader.MAVLINK_REBOOT_ID1)
-                self.__send(uploader.MAVLINK_REBOOT_ID0)
+                try:
+                    # try reboot via NSH first
+                    self.__send(uploader.NSH_INIT)
+                    self.__send(uploader.NSH_REBOOT_BL)
+                    self.__send(uploader.NSH_INIT)
+                    self.__send(uploader.NSH_REBOOT)
+                    # then try MAVLINK command
+                    self.__send(uploader.MAVLINK_REBOOT_ID1)
+                    self.__send(uploader.MAVLINK_REBOOT_ID0)
+                except:
+                    return
                 
                 
 
@@ -430,7 +485,7 @@ while True:
                                 # Windows, don't open POSIX ports
                                 if not "/" in port:
                                         up = uploader(port, args.baud)
-                except:
+                except Exception:
                         # open failed, rate-limit our attempts
                         time.sleep(0.05)
 
@@ -443,7 +498,7 @@ while True:
                         up.identify()
                         print("Found board %x,%x bootloader rev %x on %s" % (up.board_type, up.board_rev, up.bl_rev, port))
 
-                except:
+                except Exception:
                         # most probably a timeout talking to the port, no bootloader, try to reboot the board
                         print("attempting reboot on %s..." % port)
                         up.send_reboot()

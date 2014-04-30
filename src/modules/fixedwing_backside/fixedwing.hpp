@@ -255,16 +255,16 @@ private:
 	BlockWaypointGuidance _guide;
 
 	// block params
-	BlockParam<float> _trimAil;
-	BlockParam<float> _trimElv;
-	BlockParam<float> _trimRdr;
-	BlockParam<float> _trimThr;
-	BlockParam<float> _trimV;
-	BlockParam<float> _vCmd;
-	BlockParam<float> _crMax;
+	BlockParamFloat _trimAil;
+	BlockParamFloat _trimElv;
+	BlockParamFloat _trimRdr;
+	BlockParamFloat _trimThr;
+	BlockParamFloat _trimV;
+	BlockParamFloat _vCmd;
+	BlockParamFloat _crMax;
 
 	struct pollfd _attPoll;
-	vehicle_global_position_set_triplet_s _lastPosCmd;
+	position_setpoint_triplet_s _lastMissionCmd;
 	enum {CH_AIL, CH_ELV, CH_RDR, CH_THR};
 	uint64_t _timeStamp;
 public:

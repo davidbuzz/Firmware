@@ -32,7 +32,9 @@
  ****************************************************************************/
 
 /**
- * @file Barometric pressure sensor driver interface.
+ * @file drv_baro.h
+ *
+ * Barometric pressure sensor driver interface.
  */
 
 #ifndef _DRV_BARO_H
@@ -56,6 +58,10 @@ struct baro_report {
 	float temperature;
 	uint64_t timestamp;
 	uint64_t error_count;
+
+	// raw MS5611 values for debugging
+	uint32_t ms5611_D1;
+	uint32_t ms5611_D2;
 };
 
 /*

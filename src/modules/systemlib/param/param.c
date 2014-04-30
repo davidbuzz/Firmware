@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2012-2014 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -61,7 +61,7 @@
 #include "uORB/uORB.h"
 #include "uORB/topics/parameter_update.h"
 
-#if 1
+#if 0
 # define debug(fmt, args...)		do { warnx(fmt, ##args); } while(0)
 #else
 # define debug(fmt, args...)		do { } while(0)
@@ -508,64 +508,86 @@ param_get_default_file(void)
 int
 param_save_default(void)
 {
-	int result;
-	unsigned retries = 0;
-
-	/* delete the file in case it exists */
-	struct stat buffer;
-	if (stat(param_get_default_file(), &buffer) == 0) {
-
-		do {
-			result = unlink(param_get_default_file());
-			if (result != 0) {
-				retries++;
-				usleep(1000 * retries);
-			}
-		} while (result != OK && retries < 10);
-
-		if (result != OK)
-			warnx("unlinking file %s failed.", param_get_default_file());
-	}
-
-	/* create the file */
+	int res;
 	int fd;
 
-	do {
-		/* do another attempt in case the unlink call is not synced yet */
-		fd = open(param_get_default_file(), O_WRONLY | O_CREAT | O_EXCL);
-		if (fd < 0) {
-			retries++;
-			usleep(1000 * retries);
-		}
+	const char *filename = param_get_default_file();
 
-	} while (fd < 0 && retries < 10);
+	/* write parameters to temp file */
+	fd = open(filename, O_WRONLY | O_CREAT);
 
 	if (fd < 0) {
-		
-		warn("opening '%s' for writing failed", param_get_default_file());
-		return fd;
+		warn("failed to open param file: %s", filename);
+		return ERROR;
 	}
 
-	do {
-		result = param_export(fd, false);
+	if (res == OK) {
+		res = param_export(fd, false);
 
-		if (result != OK) {
-			retries++;
-			usleep(1000 * retries);
-		}
-
-	} while (result != 0 && retries < 10);
-
+	        if (res != OK) {
+	            warnx("failed to write parameters to file: %s", filename);
+	        }
+	}
 
 	close(fd);
 
-	if (result != OK) {
-		warn("error exporting parameters to '%s'", param_get_default_file());
-		(void)unlink(param_get_default_file());
-		return result;
+	return res;
+
+#if 0
+	const char *filename_tmp = malloc(strlen(filename) + 5);
+	sprintf(filename_tmp, "%s.tmp", filename);
+
+	/* delete temp file if exist */
+	res = unlink(filename_tmp);
+
+	if (res != OK && errno == ENOENT)
+		res = OK;
+
+	if (res != OK)
+		warn("failed to delete temp file: %s", filename_tmp);
+
+	if (res == OK) {
+		/* write parameters to temp file */
+		fd = open(filename_tmp, O_WRONLY | O_CREAT | O_EXCL);
+
+		if (fd < 0) {
+			warn("failed to open temp file: %s", filename_tmp);
+			res = ERROR;
+		}
+
+		if (res == OK) {
+			res = param_export(fd, false);
+
+			if (res != OK)
+				warnx("failed to write parameters to file: %s", filename_tmp);
+		}
+
+		close(fd);
 	}
 
-	return 0;
+	if (res == OK) {
+		/* delete parameters file */
+		res = unlink(filename);
+
+		if (res != OK && errno == ENOENT)
+			res = OK;
+
+		if (res != OK)
+			warn("failed to delete parameters file: %s", filename);
+	}
+
+	if (res == OK) {
+		/* rename temp file to parameters */
+		res = rename(filename_tmp, filename);
+
+		if (res != OK)
+			warn("failed to rename %s to %s", filename_tmp, filename);
+	}
+
+	free(filename_tmp);
+
+	return res;
+#endif
 }
 
 /**
@@ -574,9 +596,9 @@ param_save_default(void)
 int
 param_load_default(void)
 {
-	int fd = open(param_get_default_file(), O_RDONLY);
+	int fd_load = open(param_get_default_file(), O_RDONLY);
 
-	if (fd < 0) {
+	if (fd_load < 0) {
 		/* no parameter file is OK, otherwise this is an error */
 		if (errno != ENOENT) {
 			warn("open '%s' for reading failed", param_get_default_file());
@@ -585,8 +607,8 @@ param_load_default(void)
 		return 1;
 	}
 
-	int result = param_load(fd);
-	close(fd);
+	int result = param_load(fd_load);
+	close(fd_load);
 
 	if (result != 0) {
 		warn("error reading parameters from '%s'", param_get_default_file());

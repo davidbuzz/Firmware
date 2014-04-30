@@ -58,6 +58,7 @@
 #include <nuttx/sdio.h>
 #include <nuttx/mmcsd.h>
 #include <nuttx/analog/adc.h>
+#include <nuttx/gran.h>
 
 #include <stm32.h>
 #include "board_config.h"
@@ -69,6 +70,7 @@
 #include <drivers/drv_led.h>
 
 #include <systemlib/cpuload.h>
+#include <systemlib/perf_counter.h>
 
 /****************************************************************************
  * Pre-Processor Definitions
@@ -96,9 +98,69 @@
  * Protected Functions
  ****************************************************************************/
 
+#if defined(CONFIG_FAT_DMAMEMORY)
+# if !defined(CONFIG_GRAN) || !defined(CONFIG_FAT_DMAMEMORY)
+#  error microSD DMA support requires CONFIG_GRAN
+# endif
+
+static GRAN_HANDLE dma_allocator;
+
+/* 
+ * The DMA heap size constrains the total number of things that can be 
+ * ready to do DMA at a time.
+ *
+ * For example, FAT DMA depends on one sector-sized buffer per filesystem plus
+ * one sector-sized buffer per file. 
+ *
+ * We use a fundamental alignment / granule size of 64B; this is sufficient
+ * to guarantee alignment for the largest STM32 DMA burst (16 beats x 32bits).
+ */
+static uint8_t g_dma_heap[8192] __attribute__((aligned(64)));
+static perf_counter_t g_dma_perf;
+
+static void
+dma_alloc_init(void)
+{
+	dma_allocator = gran_initialize(g_dma_heap,
+					sizeof(g_dma_heap),
+					7,  /* 128B granule - must be > alignment (XXX bug?) */
+					6); /* 64B alignment */
+	if (dma_allocator == NULL) {
+		message("[boot] DMA allocator setup FAILED");
+	} else {
+		g_dma_perf = perf_alloc(PC_COUNT, "DMA allocations");
+	}
+}
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/*
+ * DMA-aware allocator stubs for the FAT filesystem.
+ */
+
+__EXPORT void *fat_dma_alloc(size_t size);
+__EXPORT void fat_dma_free(FAR void *memory, size_t size);
+
+void *
+fat_dma_alloc(size_t size)
+{
+	perf_count(g_dma_perf);
+	return gran_alloc(dma_allocator, size);
+}
+
+void
+fat_dma_free(FAR void *memory, size_t size)
+{
+	gran_free(dma_allocator, memory, size);
+}
+
+#else
+
+# define dma_alloc_init()
+
+#endif
 
 /************************************************************************************
  * Name: stm32_boardinitialize
@@ -110,7 +172,8 @@
  *
  ************************************************************************************/
 
-__EXPORT void stm32_boardinitialize(void)
+__EXPORT void
+stm32_boardinitialize(void)
 {
 	/* configure SPI interfaces */
 	stm32_spiinitialize();
@@ -170,6 +233,9 @@ __EXPORT int nsh_archinitialize(void)
 	/* configure the high-resolution time/callout interface */
 	hrt_init();
 
+	/* configure the DMA allocator */
+	dma_alloc_init();
+
 	/* configure CPU load estimation */
 #ifdef CONFIG_SCHED_INSTRUMENTATION
 	cpuload_initialize_once();
@@ -216,7 +282,7 @@ __EXPORT int nsh_archinitialize(void)
 	SPI_SELECT(spi1, PX4_SPIDEV_MPU, false);
 	up_udelay(20);
 
-	message("[boot] Successfully initialized SPI port 1\n");
+	message("[boot] Initialized SPI port 1 (SENSORS)\n");
 
 	/* Get the SPI port for the FRAM */
 
@@ -228,20 +294,23 @@ __EXPORT int nsh_archinitialize(void)
 		return -ENODEV;
 	}
 
-	/* Default SPI2 to 37.5 MHz (F4 max) and de-assert the known chip selects. */
-	SPI_SETFREQUENCY(spi2, 375000000);
+	/* Default SPI2 to 37.5 MHz (40 MHz rounded to nearest valid divider, F4 max)
+	 * and de-assert the known chip selects. */
+
+	// XXX start with 10.4 MHz in FRAM usage and go up to 37.5 once validated
+	SPI_SETFREQUENCY(spi2, 12 * 1000 * 1000);
 	SPI_SETBITS(spi2, 8);
 	SPI_SETMODE(spi2, SPIDEV_MODE3);
 	SPI_SELECT(spi2, SPIDEV_FLASH, false);
 
-	message("[boot] Successfully initialized SPI port 2\n");
+	message("[boot] Initialized SPI port 2 (RAMTRON FRAM)\n");
 
 	#ifdef CONFIG_MMCSD
 	/* First, get an instance of the SDIO interface */
 
 	sdio = sdio_initialize(CONFIG_NSH_MMCSDSLOTNO);
 	if (!sdio) {
-		message("nsh_archinitialize: Failed to initialize SDIO slot %d\n",
+		message("[boot] Failed to initialize SDIO slot %d\n",
 			CONFIG_NSH_MMCSDSLOTNO);
 		return -ENODEV;
 	}
@@ -249,7 +318,7 @@ __EXPORT int nsh_archinitialize(void)
 	/* Now bind the SDIO interface to the MMC/SD driver */
 	int ret = mmcsd_slotinitialize(CONFIG_NSH_MMCSDMINOR, sdio);
 	if (ret != OK) {
-		message("nsh_archinitialize: Failed to bind SDIO to the MMC/SD driver: %d\n", ret);
+		message("[boot] Failed to bind SDIO to the MMC/SD driver: %d\n", ret);
 		return ret;
 	}
 

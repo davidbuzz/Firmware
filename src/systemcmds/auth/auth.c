@@ -44,6 +44,7 @@
 #include <nuttx/sched.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <systemlib/board_serial.h>
 
 
 //#include <apps/netutils/base64.h>
@@ -622,24 +623,18 @@ JUhfBqfsiIQjUMxsnR2hDmg4CJrWpUo9fHOkAPBZ2NXTLTvnrAgMBAAE="); //"
  		
 	// read serial from real chip ROM. 
 	if ( usetrueserial  ) { 
-	     warnx("usetrueserial");
-    	// read out unique chip ID / 
-    	const volatile uint32_t* udid_ptr = (const uint32_t*)UDID_START;
-    	union udid id;
-    	val_read(&id, udid_ptr, sizeof(id));
- 
- 	
-     	//  this copies the data from the id "union" to the serialid char[] array, but on hthe px4, it's the wrong endian order.
-        //memcpy(serialid,id.data,12); // first 12 bytes are from serial 
-    	//      
-    	   // this is the right order for the px4: , there's a neater way to do this, but it'll do for now. 
-    	serialid[0] = id.data[3]; 	serialid[1] = id.data[2];	serialid[2] = id.data[1];	serialid[3] = id.data[0];
-    	serialid[4] = id.data[7]; 	serialid[5] = id.data[6];	serialid[6] = id.data[5];	serialid[7] = id.data[4];
-    	serialid[8] = id.data[11]; 	serialid[9] = id.data[10];	serialid[10] = id.data[9];	serialid[11] = id.data[8];
+		warnx("usetrueserial");
+		// read out unique chip ID / 
+		get_board_serial(serialid);
+		
+		// only allows to dump the *real* serial to the SD card ( in binary format, for compatability with -f ) 
+		if ( dumpserialtosd ) { 
+			//write_whole_file_to_sd("/fs/microsd/COA.ser",serial,SERIAL_LEN ); 
+			write_whole_file_to_sd("/fs/microsd/COA.sid",serialid,BIN_SERIAL_LEN ); 
+		} 
     	
-    	
-   	    useSDserial = false;  usehardcodedserial = false;  useinteractiveserial = false; 
-	} 	
+		useSDserial = false;  usehardcodedserial = false;  useinteractiveserial = false; 
+	}
  
     // allow to override the serial number 	
     if ( usehardcodedserial ) { 
@@ -686,16 +681,7 @@ JUhfBqfsiIQjUMxsnR2hDmg4CJrWpUo9fHOkAPBZ2NXTLTvnrAgMBAAE="); //"
  	   	
 	unsigned char serial[SERIAL_LEN]; // human-readable version is 27 bytes  ( 3x8 + two whitespace +null) 
 	
-	human_readable_serial( &serialid, &serial ) ;  // from serialid, to serial  
-	
-	
-	// we only allow to dump the *real* serial to the SD card, but dump both formats: 
-    if ( usetrueserial  && dumpserialtosd ) { 
-            // in human-readable format, for humans, just like -y does, but without a cert
-            write_whole_file_to_sd("/fs/microsd/COA.ser",serial,SERIAL_LEN ); 
-            // in binary format, for compatability with -f 
-            write_whole_file_to_sd("/fs/microsd/COA.sid",serialid,BIN_SERIAL_LEN ); 
-    }
+	human_readable_serial( &serialid, &serial ) ;  // from serialid, to serial
 	
 	if ( usehardcodedserial ) { 
         warnx("WARNING !!!! FORCING hardcoded serial: '%s' - TESTING ONLY\n", serial); 

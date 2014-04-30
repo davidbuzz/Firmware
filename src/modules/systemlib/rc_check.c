@@ -45,15 +45,13 @@
 #include <systemlib/rc_check.h>
 #include <systemlib/param/param.h>
 #include <mavlink/mavlink_log.h>
-#include <uORB/topics/rc_channels.h>
+#include <drivers/drv_rc_input.h>
 
-int rc_calibration_check(void) {
+int rc_calibration_check(int mavlink_fd) {
 
 	char nbuf[20];
 	param_t _parameter_handles_min, _parameter_handles_trim, _parameter_handles_max,
 	_parameter_handles_rev, _parameter_handles_dz;
-
-	int mavlink_fd = open(MAVLINK_LOG_DEVICE, 0);
 
 	float param_min, param_max, param_trim, param_rev, param_dz;
 
@@ -68,7 +66,7 @@ int rc_calibration_check(void) {
 
 	int channel_fail_count = 0;
 
-	for (int i = 0; i < RC_CHANNELS_MAX; i++) {
+	for (int i = 0; i < RC_INPUT_MAX_CHANNELS; i++) {
 		/* should the channel be enabled? */
 		uint8_t count = 0;
 

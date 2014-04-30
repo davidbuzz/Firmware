@@ -90,6 +90,9 @@ ORB_DEFINE(battery_status, struct battery_status_s);
 #include "topics/servorail_status.h"
 ORB_DEFINE(servorail_status, struct servorail_status_s);
 
+#include "topics/system_power.h"
+ORB_DEFINE(system_power, struct system_power_s);
+
 #include "topics/vehicle_global_position.h"
 ORB_DEFINE(vehicle_global_position, struct vehicle_global_position_s);
 
@@ -117,17 +120,21 @@ ORB_DEFINE(vehicle_local_position_setpoint, struct vehicle_local_position_setpoi
 #include "topics/vehicle_bodyframe_speed_setpoint.h"
 ORB_DEFINE(vehicle_bodyframe_speed_setpoint, struct vehicle_bodyframe_speed_setpoint_s);
 
-#include "topics/vehicle_global_position_setpoint.h"
-ORB_DEFINE(vehicle_global_position_setpoint, struct vehicle_global_position_setpoint_s);
-
-#include "topics/vehicle_global_position_set_triplet.h"
-ORB_DEFINE(vehicle_global_position_set_triplet, struct vehicle_global_position_set_triplet_s);
+#include "topics/position_setpoint_triplet.h"
+ORB_DEFINE(position_setpoint_triplet, struct position_setpoint_triplet_s);
 
 #include "topics/vehicle_global_velocity_setpoint.h"
 ORB_DEFINE(vehicle_global_velocity_setpoint, struct vehicle_global_velocity_setpoint_s);
 
 #include "topics/mission.h"
 ORB_DEFINE(mission, struct mission_s);
+ORB_DEFINE(onboard_mission, struct mission_s);
+
+#include "topics/mission_result.h"
+ORB_DEFINE(mission_result, struct mission_result_s);
+
+#include "topics/fence.h"
+ORB_DEFINE(fence, unsigned);
 
 #include "topics/vehicle_attitude_setpoint.h"
 ORB_DEFINE(vehicle_attitude_setpoint, struct vehicle_attitude_setpoint_s);
@@ -169,13 +176,6 @@ ORB_DEFINE(actuator_controls_3, struct actuator_controls_s);
 #include "topics/actuator_armed.h"
 ORB_DEFINE(actuator_armed, struct actuator_armed_s);
 
-/* actuator controls, as set by actuators / mixers after limiting */
-#include "topics/actuator_controls_effective.h"
-ORB_DEFINE(actuator_controls_effective_0, struct actuator_controls_effective_s);
-ORB_DEFINE(actuator_controls_effective_1, struct actuator_controls_effective_s);
-ORB_DEFINE(actuator_controls_effective_2, struct actuator_controls_effective_s);
-ORB_DEFINE(actuator_controls_effective_3, struct actuator_controls_effective_s);
-
 #include "topics/actuator_outputs.h"
 ORB_DEFINE(actuator_outputs_0, struct actuator_outputs_s);
 ORB_DEFINE(actuator_outputs_1, struct actuator_outputs_s);
@@ -193,3 +193,6 @@ ORB_DEFINE(navigation_capabilities, struct navigation_capabilities_s);
 
 #include "topics/esc_status.h"
 ORB_DEFINE(esc_status, struct esc_status_s);
+
+#include "topics/encoders.h"
+ORB_DEFINE(encoders, struct encoders_s);
