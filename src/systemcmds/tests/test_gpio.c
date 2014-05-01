@@ -92,7 +92,7 @@ int test_gpio(int argc, char *argv[])
 {
 	int		ret = 0;
 
-#if CONFIG_HAL_BOARD != HAL_BOARD_Quanton  // no IO board on a quanton.
+#if CONFIG_HAL_BOARD != HAL_BOARD_QUANTON  // no IO board on a quanton.
 	int		fd;
 
 	fd = open(PX4IO_DEVICE_PATH, 0);
