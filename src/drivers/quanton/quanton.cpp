@@ -64,19 +64,25 @@
 #include <systemlib/systemlib.h>
 #include <systemlib/err.h>
 #include <systemlib/mixer/mixer.h>
+#include <systemlib/pwm_limit/pwm_limit.h>
+#include <systemlib/board_serial.h>
 #include <drivers/drv_mixer.h>
 #include <drivers/drv_rc_input.h>
 
 #include <uORB/topics/actuator_controls.h>
-#include <uORB/topics/actuator_controls_effective.h>
 #include <uORB/topics/actuator_outputs.h>
 #include <uORB/topics/actuator_armed.h>
 
-#include <systemlib/err.h>
+
 #ifdef HRT_PPM_CHANNEL
 # include <systemlib/ppm_decode.h>
 #endif
 
+/*
+ * This is the analog to FMU_INPUT_DROP_LIMIT_US on the IO side
+ */
+
+#define CONTROL_INPUT_DROP_LIMIT_MS		20
 class Quanton : public device::CDev
 {
 public:
@@ -111,16 +117,24 @@ private:
 	int		_t_actuators;
 	int		_t_actuator_armed;
 	orb_advert_t	_t_outputs;
-	orb_advert_t	_t_actuators_effective;
 	unsigned	_num_outputs;
 	bool		_primary_pwm_device;
 
 	volatile bool	_task_should_exit;
 	bool		_armed;
+	bool		_pwm_on;
 
 	MixerGroup	*_mixers;
 
 	actuator_controls_s _controls;
+
+	pwm_limit_t	_pwm_limit;
+	uint16_t	_failsafe_pwm[_max_actuators];
+	uint16_t	_disarmed_pwm[_max_actuators];
+	uint16_t	_min_pwm[_max_actuators];
+	uint16_t	_max_pwm[_max_actuators];
+	unsigned	_num_failsafe_set;
+	unsigned	_num_disarmed_set;
 
 	static void	task_main_trampoline(int argc, char *argv[]);
 	void		task_main() __attribute__((noreturn));
@@ -143,6 +157,7 @@ private:
 	static const unsigned	_ngpio;
 
 	void		gpio_reset(void);
+	void		sensor_reset(int ms);
 	void		gpio_set_function(uint32_t gpios, int function);
 	void		gpio_write(uint32_t gpios, int function);
 	uint32_t	gpio_read(void);
@@ -182,13 +197,22 @@ Quanton::Quanton() :
 	_t_actuators(-1),
 	_t_actuator_armed(-1),
 	_t_outputs(0),
-	_t_actuators_effective(0),
 	_num_outputs(0),
 	_primary_pwm_device(false),
 	_task_should_exit(false),
 	_armed(false),
-	_mixers(nullptr)
+	_pwm_on(false),
+	_mixers(nullptr),
+	_failsafe_pwm({0}),
+	      _disarmed_pwm({0}),
+	      _num_failsafe_set(0),
+	      _num_disarmed_set(0)
 {
+	for (unsigned i = 0; i < _max_actuators; i++) {
+		_min_pwm[i] = PWM_DEFAULT_MIN;
+		_max_pwm[i] = PWM_DEFAULT_MAX;
+	}
+
 	_debug_enabled = true;
 }
 
@@ -419,13 +443,6 @@ Quanton::task_main()
 	_t_outputs = orb_advertise(_primary_pwm_device ? ORB_ID_VEHICLE_CONTROLS : ORB_ID(actuator_outputs_1),
 				   &outputs);
 
-	/* advertise the effective control inputs */
-	actuator_controls_effective_s controls_effective;
-	memset(&controls_effective, 0, sizeof(controls_effective));
-	/* advertise the effective control inputs */
-	_t_actuators_effective = orb_advertise(_primary_pwm_device ? ORB_ID_VEHICLE_ATTITUDE_CONTROLS_EFFECTIVE : ORB_ID(actuator_controls_effective_1),
-				   &controls_effective);
-
 	pollfd fds[2];
 	fds[0].fd = _t_actuators;
 	fds[0].events = POLLIN;
@@ -440,6 +457,9 @@ Quanton::task_main()
 	memset(&rc_in, 0, sizeof(rc_in));
 	rc_in.input_source = RC_INPUT_SOURCE_Quanton_PPM;
 #endif
+
+	/* initialize PWM limit lib */
+	pwm_limit_init(&_pwm_limit);
 
 	log("starting");
 
@@ -475,20 +495,25 @@ Quanton::task_main()
 
 		/* sleep waiting for data, stopping to check for PPM
 		 * input at 100Hz */
-		int ret = ::poll(&fds[0], 2, 10);
+		int ret = ::poll(&fds[0], 2, CONTROL_INPUT_DROP_LIMIT_MS);
 
 		/* this would be bad... */
 		if (ret < 0) {
 			log("poll error %d", errno);
 			usleep(1000000);
 			continue;
-		}
+
+		} else if (ret == 0) {
+			/* timeout: no control data, switch to failsafe values */
+//			warnx("no PWM: failsafe");
+
+		} else {
 
 		/* do we have a control update? */
 		if (fds[0].revents & POLLIN) {
 
-			/* get controls - must always do this to avoid spinning */
-			orb_copy(ORB_ID_VEHICLE_ATTITUDE_CONTROLS, _t_actuators, &_controls);
+				/* get controls - must always do this to avoid spinning */
+				orb_copy(_primary_pwm_device ? ORB_ID_VEHICLE_ATTITUDE_CONTROLS : ORB_ID(actuator_controls_1), _t_actuators, &_controls);
 
 			/* can we mix? */
 			if (_mixers != nullptr) {
@@ -514,33 +539,30 @@ Quanton::task_main()
 				outputs.noutputs = _mixers->mix(&outputs.output[0], num_outputs);
 				outputs.timestamp = hrt_absolute_time();
 
-				// XXX output actual limited values
-				memcpy(&controls_effective, &_controls, sizeof(controls_effective));
-
-				orb_publish(_primary_pwm_device ? ORB_ID_VEHICLE_ATTITUDE_CONTROLS_EFFECTIVE : ORB_ID(actuator_controls_effective_1), _t_actuators_effective, &controls_effective);
-
-				/* iterate actuators */
-				for (unsigned i = 0; i < num_outputs; i++) {
-
-					/* last resort: catch NaN, INF and out-of-band errors */
-					if (i < outputs.noutputs &&
-						isfinite(outputs.output[i]) &&
-						outputs.output[i] >= -1.0f &&
-						outputs.output[i] <= 1.0f) {
-						/* scale for PWM output 900 - 2100us */
-						outputs.output[i] = 1500 + (600 * outputs.output[i]);
-					} else {
-						/*
-						 * Value is NaN, INF or out of band - set to the minimum value.
-						 * This will be clearly visible on the servo status and will limit the risk of accidentally
-						 * spinning motors. It would be deadly in flight.
-						 */
-						outputs.output[i] = 900;
+					/* iterate actuators */
+					for (unsigned i = 0; i < num_outputs; i++) {
+						/* last resort: catch NaN, INF and out-of-band errors */
+						if (i >= outputs.noutputs ||
+						    !isfinite(outputs.output[i]) ||
+						    outputs.output[i] < -1.0f ||
+						    outputs.output[i] > 1.0f) {
+							/*
+							 * Value is NaN, INF or out of band - set to the minimum value.
+							 * This will be clearly visible on the servo status and will limit the risk of accidentally
+							 * spinning motors. It would be deadly in flight.
+							 */
+							outputs.output[i] = -1.0f;
+						}
 					}
 
-					/* output to the servo */
-					up_pwm_servo_set(i, outputs.output[i]);
-				}
+					uint16_t pwm_limited[num_outputs];
+
+					pwm_limit_calc(_armed, num_outputs, _disarmed_pwm, _min_pwm, _max_pwm, outputs.output, pwm_limited, &_pwm_limit);
+
+					/* output to the servos */
+					for (unsigned i = 0; i < num_outputs; i++) {
+						up_pwm_servo_set(i, pwm_limited[i]);
+					}
 
 				/* and publish for anyone that cares to see */
 				orb_publish(_primary_pwm_device ? ORB_ID_VEHICLE_CONTROLS : ORB_ID(actuator_outputs_1), _t_outputs, &outputs);
@@ -554,26 +576,44 @@ Quanton::task_main()
 			/* get new value */
 			orb_copy(ORB_ID(actuator_armed), _t_actuator_armed, &aa);
 
-			/* update PWM servo armed status if armed and not locked down */
-			bool set_armed = aa.armed && !aa.lockdown;
-			if (set_armed != _armed) {
-				_armed = set_armed;
-				up_pwm_servo_arm(set_armed);
+				/* update the armed status and check that we're not locked down */
+				bool set_armed = aa.armed && !aa.lockdown;
+
+				if (_armed != set_armed)
+					_armed = set_armed;
+
+				/* update PWM status if armed or if disarmed PWM values are set */
+				bool pwm_on = (aa.armed || _num_disarmed_set > 0);
+
+				if (_pwm_on != pwm_on) {
+					_pwm_on = pwm_on;
+					up_pwm_servo_arm(pwm_on);
+				}
 			}
 		}
 
 #ifdef HRT_PPM_CHANNEL
 		// see if we have new PPM input data
-		if (ppm_last_valid_decode != rc_in.timestamp) {
+		if (ppm_last_valid_decode != rc_in.timestamp_last_signal) {
 			// we have a new PPM frame. Publish it.
 			rc_in.channel_count = ppm_decoded_channels;
 			if (rc_in.channel_count > RC_INPUT_MAX_CHANNELS) {
 				rc_in.channel_count = RC_INPUT_MAX_CHANNELS;
 			}
-			for (uint8_t i=0; i<rc_in.channel_count; i++) {
+
+			for (uint8_t i = 0; i < rc_in.channel_count; i++) {
 				rc_in.values[i] = ppm_buffer[i];
 			}
-			rc_in.timestamp = ppm_last_valid_decode;
+
+			rc_in.timestamp_publication = ppm_last_valid_decode;
+			rc_in.timestamp_last_signal = ppm_last_valid_decode;
+
+			rc_in.rc_ppm_frame_length = ppm_frame_length;
+			rc_in.rssi = RC_INPUT_RSSI_MAX;
+			rc_in.rc_failsafe = false;
+			rc_in.rc_lost = false;
+			rc_in.rc_lost_frame_count = 0;
+			rc_in.rc_total_frame_count = 0;
 
 			/* lazily advertise on first publication */
 			if (to_input_rc == 0) {
@@ -587,7 +627,6 @@ Quanton::task_main()
 	}
 
 	::close(_t_actuators);
-	::close(_t_actuators_effective);
 	::close(_t_actuator_armed);
 
 	/* make sure servos are off */
@@ -662,6 +701,7 @@ Quanton::pwm_ioctl(file *filp, int cmd, unsigned long arg)
 
 	case PWM_SERVO_SET_ARM_OK:
 	case PWM_SERVO_CLEAR_ARM_OK:
+	case PWM_SERVO_SET_FORCE_SAFETY_OFF:
 		// these are no-ops, as no safety switch
 		break;
 
@@ -669,13 +709,197 @@ Quanton::pwm_ioctl(file *filp, int cmd, unsigned long arg)
 		up_pwm_servo_arm(false);
 		break;
 
+	case PWM_SERVO_GET_DEFAULT_UPDATE_RATE:
+		*(uint32_t *)arg = _pwm_default_rate;
+		break;
+
 	case PWM_SERVO_SET_UPDATE_RATE:
 		ret = set_pwm_rate(_pwm_alt_rate_channels, _pwm_default_rate, arg);
 		break;
 
-	case PWM_SERVO_SELECT_UPDATE_RATE:
+	case PWM_SERVO_GET_UPDATE_RATE:
+		*(uint32_t *)arg = _pwm_alt_rate;
+		break;
+
+	case PWM_SERVO_SET_SELECT_UPDATE_RATE:
 		ret = set_pwm_rate(arg, _pwm_default_rate, _pwm_alt_rate);
 		break;
+
+	case PWM_SERVO_GET_SELECT_UPDATE_RATE:
+		*(uint32_t *)arg = _pwm_alt_rate_channels;
+		break;
+
+	case PWM_SERVO_SET_FAILSAFE_PWM: {
+			struct pwm_output_values *pwm = (struct pwm_output_values *)arg;
+
+			/* discard if too many values are sent */
+			if (pwm->channel_count > _max_actuators) {
+				ret = -EINVAL;
+				break;
+			}
+
+			for (unsigned i = 0; i < pwm->channel_count; i++) {
+				if (pwm->values[i] == 0) {
+					/* ignore 0 */
+				} else if (pwm->values[i] > PWM_HIGHEST_MAX) {
+					_failsafe_pwm[i] = PWM_HIGHEST_MAX;
+
+				} else if (pwm->values[i] < PWM_LOWEST_MIN) {
+					_failsafe_pwm[i] = PWM_LOWEST_MIN;
+
+				} else {
+					_failsafe_pwm[i] = pwm->values[i];
+				}
+			}
+
+			/*
+			 * update the counter
+			 * this is needed to decide if disarmed PWM output should be turned on or not
+			 */
+			_num_failsafe_set = 0;
+
+			for (unsigned i = 0; i < _max_actuators; i++) {
+				if (_failsafe_pwm[i] > 0)
+					_num_failsafe_set++;
+			}
+
+			break;
+		}
+
+	case PWM_SERVO_GET_FAILSAFE_PWM: {
+			struct pwm_output_values *pwm = (struct pwm_output_values *)arg;
+
+			for (unsigned i = 0; i < _max_actuators; i++) {
+				pwm->values[i] = _failsafe_pwm[i];
+			}
+
+			pwm->channel_count = _max_actuators;
+			break;
+		}
+
+	case PWM_SERVO_SET_DISARMED_PWM: {
+			struct pwm_output_values *pwm = (struct pwm_output_values *)arg;
+
+			/* discard if too many values are sent */
+			if (pwm->channel_count > _max_actuators) {
+				ret = -EINVAL;
+				break;
+			}
+
+			for (unsigned i = 0; i < pwm->channel_count; i++) {
+				if (pwm->values[i] == 0) {
+					/* ignore 0 */
+				} else if (pwm->values[i] > PWM_HIGHEST_MAX) {
+					_disarmed_pwm[i] = PWM_HIGHEST_MAX;
+
+				} else if (pwm->values[i] < PWM_LOWEST_MIN) {
+					_disarmed_pwm[i] = PWM_LOWEST_MIN;
+
+				} else {
+					_disarmed_pwm[i] = pwm->values[i];
+				}
+			}
+
+			/*
+			 * update the counter
+			 * this is needed to decide if disarmed PWM output should be turned on or not
+			 */
+			_num_disarmed_set = 0;
+
+			for (unsigned i = 0; i < _max_actuators; i++) {
+				if (_disarmed_pwm[i] > 0)
+					_num_disarmed_set++;
+			}
+
+			break;
+		}
+
+	case PWM_SERVO_GET_DISARMED_PWM: {
+			struct pwm_output_values *pwm = (struct pwm_output_values *)arg;
+
+			for (unsigned i = 0; i < _max_actuators; i++) {
+				pwm->values[i] = _disarmed_pwm[i];
+			}
+
+			pwm->channel_count = _max_actuators;
+			break;
+		}
+
+	case PWM_SERVO_SET_MIN_PWM: {
+			struct pwm_output_values *pwm = (struct pwm_output_values *)arg;
+
+			/* discard if too many values are sent */
+			if (pwm->channel_count > _max_actuators) {
+				ret = -EINVAL;
+				break;
+			}
+
+			for (unsigned i = 0; i < pwm->channel_count; i++) {
+				if (pwm->values[i] == 0) {
+					/* ignore 0 */
+				} else if (pwm->values[i] > PWM_HIGHEST_MIN) {
+					_min_pwm[i] = PWM_HIGHEST_MIN;
+
+				} else if (pwm->values[i] < PWM_LOWEST_MIN) {
+					_min_pwm[i] = PWM_LOWEST_MIN;
+
+				} else {
+					_min_pwm[i] = pwm->values[i];
+				}
+			}
+
+			break;
+		}
+
+	case PWM_SERVO_GET_MIN_PWM: {
+			struct pwm_output_values *pwm = (struct pwm_output_values *)arg;
+
+			for (unsigned i = 0; i < _max_actuators; i++) {
+				pwm->values[i] = _min_pwm[i];
+			}
+
+			pwm->channel_count = _max_actuators;
+			arg = (unsigned long)&pwm;
+			break;
+		}
+
+	case PWM_SERVO_SET_MAX_PWM: {
+			struct pwm_output_values *pwm = (struct pwm_output_values *)arg;
+
+			/* discard if too many values are sent */
+			if (pwm->channel_count > _max_actuators) {
+				ret = -EINVAL;
+				break;
+			}
+
+			for (unsigned i = 0; i < pwm->channel_count; i++) {
+				if (pwm->values[i] == 0) {
+					/* ignore 0 */
+				} else if (pwm->values[i] < PWM_LOWEST_MAX) {
+					_max_pwm[i] = PWM_LOWEST_MAX;
+
+				} else if (pwm->values[i] > PWM_HIGHEST_MAX) {
+					_max_pwm[i] = PWM_HIGHEST_MAX;
+
+				} else {
+					_max_pwm[i] = pwm->values[i];
+				}
+			}
+
+			break;
+		}
+
+	case PWM_SERVO_GET_MAX_PWM: {
+			struct pwm_output_values *pwm = (struct pwm_output_values *)arg;
+
+			for (unsigned i = 0; i < _max_actuators; i++) {
+				pwm->values[i] = _max_pwm[i];
+			}
+
+			pwm->channel_count = _max_actuators;
+			arg = (unsigned long)&pwm;
+			break;
+		}
 
 	case PWM_SERVO_SET(5):
 	case PWM_SERVO_SET(4):
@@ -695,7 +919,7 @@ Quanton::pwm_ioctl(file *filp, int cmd, unsigned long arg)
 		/* FALLTHROUGH */
 	case PWM_SERVO_SET(1):
 	case PWM_SERVO_SET(0):
-		if (arg < 2100) {
+		if (arg <= 2100) {
 			up_pwm_servo_set(cmd - PWM_SERVO_SET(0), arg);
 		} else {
 			ret = -EINVAL;
@@ -751,6 +975,40 @@ Quanton::pwm_ioctl(file *filp, int cmd, unsigned long arg)
 		}
 
 		break;
+
+	case PWM_SERVO_SET_COUNT: {
+		/* change the number of outputs that are enabled for
+		 * PWM. This is used to change the split between GPIO
+		 * and PWM under control of the flight config
+		 * parameters. Note that this does not allow for
+		 * changing a set of pins to be used for serial on
+		 * FMUv1 
+		 */
+		switch (arg) {
+		case 0:
+			set_mode(MODE_NONE);
+			break;
+
+		case 2:
+			set_mode(MODE_2PWM);
+			break;
+
+		case 4:
+			set_mode(MODE_4PWM);
+			break;
+
+#if defined(CONFIG_ARCH_BOARD_PX4FMU_V2)
+		case 6:
+			set_mode(MODE_6PWM);
+			break;
+#endif
+
+		default:
+			ret = -EINVAL;
+			break;
+		}
+		break;
+	}
 
 	case MIXERIOCRESET:
 		if (_mixers != nullptr) {
@@ -838,6 +1096,87 @@ Quanton::write(file *filp, const char *buffer, size_t len)
 	}
 	return count * 2;
 }
+
+void
+Quanton::sensor_reset(int ms)
+{
+#if defined(CONFIG_ARCH_BOARD_PX4FMU_V2)
+
+	if (ms < 1) {
+		ms = 1;
+	}
+
+	/* disable SPI bus */
+	stm32_configgpio(GPIO_SPI_CS_GYRO_OFF);
+	stm32_configgpio(GPIO_SPI_CS_ACCEL_MAG_OFF);
+	stm32_configgpio(GPIO_SPI_CS_BARO_OFF);
+	stm32_configgpio(GPIO_SPI_CS_MPU_OFF);
+
+	stm32_gpiowrite(GPIO_SPI_CS_GYRO_OFF, 0);
+	stm32_gpiowrite(GPIO_SPI_CS_ACCEL_MAG_OFF, 0);
+	stm32_gpiowrite(GPIO_SPI_CS_BARO_OFF, 0);
+	stm32_gpiowrite(GPIO_SPI_CS_MPU_OFF, 0);
+
+	stm32_configgpio(GPIO_SPI1_SCK_OFF);
+	stm32_configgpio(GPIO_SPI1_MISO_OFF);
+	stm32_configgpio(GPIO_SPI1_MOSI_OFF);
+
+	stm32_gpiowrite(GPIO_SPI1_SCK_OFF, 0);
+	stm32_gpiowrite(GPIO_SPI1_MISO_OFF, 0);
+	stm32_gpiowrite(GPIO_SPI1_MOSI_OFF, 0);
+
+	stm32_configgpio(GPIO_GYRO_DRDY_OFF);
+	stm32_configgpio(GPIO_MAG_DRDY_OFF);
+	stm32_configgpio(GPIO_ACCEL_DRDY_OFF);
+	stm32_configgpio(GPIO_EXTI_MPU_DRDY_OFF);
+
+	stm32_gpiowrite(GPIO_GYRO_DRDY_OFF, 0);
+	stm32_gpiowrite(GPIO_MAG_DRDY_OFF, 0);
+	stm32_gpiowrite(GPIO_ACCEL_DRDY_OFF, 0);
+	stm32_gpiowrite(GPIO_EXTI_MPU_DRDY_OFF, 0);
+
+	/* set the sensor rail off */
+	stm32_configgpio(GPIO_VDD_3V3_SENSORS_EN);
+	stm32_gpiowrite(GPIO_VDD_3V3_SENSORS_EN, 0);
+
+	/* wait for the sensor rail to reach GND */
+	usleep(ms * 1000);
+	warnx("reset done, %d ms", ms);
+
+	/* re-enable power */
+
+	/* switch the sensor rail back on */
+	stm32_gpiowrite(GPIO_VDD_3V3_SENSORS_EN, 1);
+
+	/* wait a bit before starting SPI, different times didn't influence results */
+	usleep(100);
+
+	/* reconfigure the SPI pins */
+#ifdef CONFIG_STM32_SPI1
+	stm32_configgpio(GPIO_SPI_CS_GYRO);
+	stm32_configgpio(GPIO_SPI_CS_ACCEL_MAG);
+	stm32_configgpio(GPIO_SPI_CS_BARO);
+	stm32_configgpio(GPIO_SPI_CS_MPU);
+
+	/* De-activate all peripherals,
+	 * required for some peripheral
+	 * state machines
+	 */
+	stm32_gpiowrite(GPIO_SPI_CS_GYRO, 1);
+	stm32_gpiowrite(GPIO_SPI_CS_ACCEL_MAG, 1);
+	stm32_gpiowrite(GPIO_SPI_CS_BARO, 1);
+	stm32_gpiowrite(GPIO_SPI_CS_MPU, 1);
+
+	// // XXX bring up the EXTI pins again
+	// stm32_configgpio(GPIO_GYRO_DRDY);
+	// stm32_configgpio(GPIO_MAG_DRDY);
+	// stm32_configgpio(GPIO_ACCEL_DRDY);
+	// stm32_configgpio(GPIO_EXTI_MPU_DRDY);
+
+#endif
+#endif
+}
+
 
 void
 Quanton::gpio_reset(void)
@@ -938,6 +1277,10 @@ Quanton::gpio_ioctl(struct file *filp, int cmd, unsigned long arg)
 
 	case GPIO_RESET:
 		gpio_reset();
+		break;
+
+	case GPIO_SENSOR_RAIL_RESET:
+		sensor_reset(arg);
 		break;
 
 	case GPIO_SET_OUTPUT:
@@ -1071,6 +1414,35 @@ quanton_start(void)
 	return ret;
 }
 
+int
+quanton_stop(void)
+{
+	int ret = OK;
+
+	if (g_fmu != nullptr) {
+
+		delete g_fmu;
+		g_fmu = nullptr;
+	}
+
+	return ret;
+}
+
+void
+sensor_reset(int ms)
+{
+	int	 fd;
+
+	fd = open(QUANTON_DEVICE_PATH, O_RDWR);
+
+	if (fd < 0)
+		errx(1, "open fail");
+
+	if (ioctl(fd, GPIO_SENSOR_RAIL_RESET, ms) < 0)
+		err(1, "servo arm failed");
+
+}
+
 void
 test(void)
 {
@@ -1105,19 +1477,21 @@ test(void)
 		for (unsigned i = 0; i < servo_count; i++)
 			servos[i] = pwm_value;
 
-                if (direction == 1) {
-                    // use ioctl interface for one direction
-                    for (unsigned i=0; i < servo_count;	i++) {
-                        if (ioctl(fd, PWM_SERVO_SET(i), servos[i]) < 0) {
-                            err(1, "servo %u set failed", i);
-                        }
-                    }
-                } else {
-                    // and use write interface for the other direction
-                    int ret = write(fd, servos, sizeof(servos));
-                    if (ret != (int)sizeof(servos))
-			err(1, "error writing PWM servo data, wrote %u got %d", sizeof(servos), ret);
-                }
+		if (direction == 1) {
+			// use ioctl interface for one direction
+			for (unsigned i = 0; i < servo_count;	i++) {
+				if (ioctl(fd, PWM_SERVO_SET(i), servos[i]) < 0) {
+					err(1, "servo %u set failed", i);
+				}
+			}
+
+		} else {
+			// and use write interface for the other direction
+			ret = write(fd, servos, sizeof(servos));
+
+			if (ret != (int)sizeof(servos))
+				err(1, "error writing PWM servo data, wrote %u got %d", sizeof(servos), ret);
+		}
 
 		if (direction > 0) {
 			if (pwm_value < 2000) {
@@ -1205,8 +1579,23 @@ quanton_main(int argc, char *argv[])
 	PortMode new_mode = PORT_MODE_UNSET;
 	const char *verb = argv[1];
 
+	if (!strcmp(verb, "stop")) {
+		quanton_stop();
+		errx(0, "Quanton driver stopped");
+	}
+
+	if (!strcmp(verb, "id")) {
+		uint8_t id[12];
+		(void)get_board_serial(id);
+
+		errx(0, "Board serial:\n %02X%02X%02X%02X %02X%02X%02X%02X %02X%02X%02X%02X",
+		     (unsigned)id[0], (unsigned)id[1], (unsigned)id[2], (unsigned)id[3], (unsigned)id[4], (unsigned)id[5],
+		     (unsigned)id[6], (unsigned)id[7], (unsigned)id[8], (unsigned)id[9], (unsigned)id[10], (unsigned)id[11]);
+	}
+
+
 	if (quanton_start() != OK)
-		errx(1, "failed to start the Quanton FMU driver");
+		errx(1, "failed to start the Quanton driver");
 
 	/*
 	 * Mode switches.
@@ -1250,7 +1639,21 @@ quanton_main(int argc, char *argv[])
 	if (!strcmp(verb, "fake"))
 		fake(argc - 1, argv + 1);
 
-	fprintf(stderr, "Quanton FMU: unrecognised command, try:\n");
+	if (!strcmp(verb, "sensor_reset")) {
+		if (argc > 2) {
+			int reset_time = strtol(argv[2], 0, 0);
+			sensor_reset(reset_time);
+
+		} else {
+			sensor_reset(0);
+			warnx("resettet default time");
+		}
+
+		exit(0);
+	}
+
+
+	fprintf(stderr, "FMU: unrecognised command %s, try:\n", verb);
 	fprintf(stderr, "  mode_gpio, mode_serial, mode_pwm, mode_gpio_serial, mode_pwm_serial, mode_pwm_gpio, test\n");
 	exit(1);
 }

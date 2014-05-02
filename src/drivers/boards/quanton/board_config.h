@@ -60,6 +60,7 @@ __BEGIN_DECLS
 
 /* PX4IO connection configuration */
 #define PX4IO_SERIAL_DEVICE	"/dev/ttyS2"
+#define UDID_START		0x1FFF7A10
 
 //#ifdef CONFIG_STM32_SPI2
 //#  error "SPI2 is not supported on this board"
@@ -180,7 +181,7 @@ __BEGIN_DECLS
 #define HRT_TIMER		1	/* use timer1 for the HRT */
 #define HRT_TIMER_CHANNEL	1	/* use capture/compare channel */
 #define HRT_PPM_CHANNEL		3	/* use capture/compare channel 3 */
-#define GPIO_PPM_IN		(GPIO_ALT|GPIO_AF1|GPIO_SPEED_50MHz|GPIO_PULLUP|GPIO_PORTA|GPIO_PIN10)
+#define GPIO_PPM_IN		(GPIO_ALT|GPIO_AF1|GPIO_PULLUP|GPIO_PORTA|GPIO_PIN10)
 
 /****************************************************************************************************
  * Public Types
