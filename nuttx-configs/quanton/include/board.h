@@ -249,11 +249,15 @@
 /*
  * SPI
  *
- * There are sensors on SPI1, and SPI3 is connected to the microSD slot.
+ * There are sensors on SPI1, SPI2, and SPI3 is/might be connected to the microSD slot.
  */
 #define GPIO_SPI1_MISO	GPIO_SPI1_MISO_1
 #define GPIO_SPI1_MOSI	GPIO_SPI1_MOSI_1
 #define GPIO_SPI1_SCK	GPIO_SPI1_SCK_1
+
+#define GPIO_SPI2_MISO	GPIO_SPI2_MISO_2   // this is at GPIO_PORTC|GPIO_PIN2 on a quanton
+#define GPIO_SPI2_MOSI	GPIO_SPI2_MOSI_2 // this is at GPIO_PORTC|GPIO_PIN3 on a quanton
+#define GPIO_SPI2_SCK	GPIO_SPI2_SCK_2  // this is at GPIO_PORTB|GPIO_PIN13 on a quanton
 
 #define GPIO_SPI3_MISO	GPIO_SPI3_MISO_2
 #define GPIO_SPI3_MOSI	GPIO_SPI3_MOSI_1
