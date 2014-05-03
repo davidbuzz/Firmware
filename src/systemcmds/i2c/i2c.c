@@ -60,9 +60,9 @@
 #ifndef PX4_I2C_BUS_ONBOARD
 #  error PX4_I2C_BUS_ONBOARD not defined, no device interface
 #endif
-#ifndef PX4_I2C_OBDEV_PX4IO
-#  error PX4_I2C_OBDEV_PX4IO not defined
-#endif
+//#ifndef PX4_I2C_OBDEV_PX4IO
+//#  error PX4_I2C_OBDEV_PX4IO not defined
+//#endif
 
 __EXPORT int i2c_main(int argc, char *argv[]);
 
@@ -80,18 +80,18 @@ int i2c_main(int argc, char *argv[])
 
 	usleep(100000);
 
-	uint8_t buf[] = { 0, 4};
-	int ret = transfer(PX4_I2C_OBDEV_PX4IO, buf, sizeof(buf), NULL, 0);
+//	uint8_t buf[] = { 0, 4};
+//	int ret = transfer(PX4_I2C_OBDEV_PX4IO, buf, sizeof(buf), NULL, 0);
+//
+//	if (ret)
+//		errx(1, "send failed - %d", ret);
+//
+//	uint32_t val;
+//	ret = transfer(PX4_I2C_OBDEV_PX4IO, NULL, 0, (uint8_t *)&val, sizeof(val));
+//	if (ret)
+//		errx(1, "recive failed - %d", ret);
 
-	if (ret)
-		errx(1, "send failed - %d", ret);
-
-	uint32_t val;
-	ret = transfer(PX4_I2C_OBDEV_PX4IO, NULL, 0, (uint8_t *)&val, sizeof(val));
-	if (ret)
-		errx(1, "recive failed - %d", ret);
-
-	errx(0, "got 0x%08x", val);
+//	errx(0, "got 0x%08x", val);
 }
 
 static int
