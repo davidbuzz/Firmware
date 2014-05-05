@@ -211,8 +211,8 @@ __EXPORT int nsh_archinitialize(void)
 	SPI_SETFREQUENCY(spi1, 10000000);
 	SPI_SETBITS(spi1, 8);
 	SPI_SETMODE(spi1, SPIDEV_MODE3);
-	SPI_SELECT(spi1, PX4_SPIDEV_GYRO, false);
-	SPI_SELECT(spi1, PX4_SPIDEV_ACCEL, false);
+//	SPI_SELECT(spi1, PX4_SPIDEV_GYRO, false);
+//	SPI_SELECT(spi1, PX4_SPIDEV_ACCEL, false);
 	SPI_SELECT(spi1, PX4_SPIDEV_MPU, false);
 	up_udelay(20);
 
@@ -225,24 +225,28 @@ __EXPORT int nsh_archinitialize(void)
 	spi2 = up_spiinitialize(2);
 
 	if (!spi2) {
-		message("[boot] Enabling IN12/13 instead of SPI2\n");
+		message("[boot] FAILED to initialize SPI port 2\n\n");
 		/* no SPI2, use pins for ADC */
-		stm32_configgpio(GPIO_ADC1_IN12);
-		stm32_configgpio(GPIO_ADC1_IN13);	// jumperable to MPU6000 DRDY on some boards
+		//stm32_configgpio(GPIO_ADC1_IN12);
+		//stm32_configgpio(GPIO_ADC1_IN13);	// jumperable to MPU6000 DRDY on some boards
+		up_ledon(LED_AMBER);
+		return -ENODEV;
+
 	} else {
 		/* Default SPI2 to 1MHz and de-assert the known chip selects. */
 		SPI_SETFREQUENCY(spi2, 10000000);
 		SPI_SETBITS(spi2, 8);
 		SPI_SETMODE(spi2, SPIDEV_MODE3);
-		SPI_SELECT(spi2, PX4_SPIDEV_GYRO, false);
-		SPI_SELECT(spi2, PX4_SPIDEV_ACCEL_MAG, false);
+	//	SPI_SELECT(spi2, PX4_SPIDEV_GYRO, false);
+	//	SPI_SELECT(spi2, PX4_SPIDEV_ACCEL_MAG, false);
+    	SPI_SELECT(spi2, PX4_SPIDEV_MPU, false);
 
-		message("[boot] Initialized SPI port2 (ADC IN12/13 blocked)\n");
+		message("[boot] Successfully initialized SPI port 2\r\n\n");
 	}
 
 	/* Get the SPI port for the microSD slot */
 
-	message("[boot] Initializing SPI port 3\n");
+//	message("[boot] Initializing SPI port 3\n");
 	spi3 = up_spiinitialize(3);
 
 	if (!spi3) {
@@ -252,6 +256,8 @@ __EXPORT int nsh_archinitialize(void)
 	}
 
 	message("[boot] Successfully initialized SPI port 3\n");
+	
+	//TODO SET THE FREQ AND WHATNOT FOR SPI3 HERE IF NEEDED -- BUZZ
 
 	/* Now bind the SPI interface to the MMCSD driver */
 	/*  result = mmcsd_spislotinitialize(CONFIG_NSH_MMCSDMINOR, CONFIG_NSH_MMCSDSLOTNO, spi3);  BUZZ TODO REPLACE MMC-SDCARD WITH SOMETHING ELSE? 
