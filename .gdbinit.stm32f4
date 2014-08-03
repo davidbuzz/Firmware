@@ -1,0 +1,7 @@
+tar rem :3333
+mon reset halt
+load
+b nsh_main
+b ArduPilot_main
+b __start
+c

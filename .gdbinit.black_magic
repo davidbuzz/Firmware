@@ -1,0 +1,4 @@
+# arm-none-eabi-gdb Build/mavstation_default.build/firmware.elf
+target extended /dev/cu.usbmodemE2C5A4C1
+monitor swdp_scan
+attach 1

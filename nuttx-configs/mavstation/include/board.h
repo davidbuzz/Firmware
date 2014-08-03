@@ -100,6 +100,7 @@
  * Some of the USART pins are not available; override the GPIO
  * definitions with an invalid pin configuration.
  */
+/* 
 #undef GPIO_USART2_CTS
 #define GPIO_USART2_CTS	0xffffffff
 #undef GPIO_USART2_RTS
@@ -114,7 +115,7 @@
 #define GPIO_USART3_CTS	0xffffffff
 #undef GPIO_USART3_RTS
 #define GPIO_USART3_RTS	0xffffffff
-
+*/
 /* 
  * High-resolution timer
  */

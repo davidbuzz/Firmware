@@ -26,7 +26,7 @@ config ARCH_BOARD_PX4IO
 
 config ARCH_BOARD_MAVSTATION
 	bool "Mavstation daughterboard"
-	depends on ARCH_CHIP_STM32F100C8
+	depends on ARCH_CHIP_STM32F102CB
 	---help---
 		Mavstation I/O expansion board
 
@@ -44,4 +44,7 @@ source "configs/px4fmu/Kconfig"
 endif
 if ARCH_BOARD_PX4IO
 source "configs/px4io/Kconfig"
+endif
+if ARCH_BOARD_MAVSTATION
+source "configs/mavstation/Kconfig"
 endif
