@@ -7,4 +7,5 @@
 #
 MODULES		+= drivers/stm32
 MODULES		+= drivers/boards/mavstation
-MODULES		+= modules/mavstation_firmware
+#MODULES		+= modules/mavstation_firmware
+MODULES		+= modules/px4_simple_app
