@@ -95,7 +95,7 @@ user_start(int argc, char *argv[])
 	up_pwm_servo_init(0xff);
 
 	/* start the i2c slave interface */
-	i2c_slave_interface_init();
+	//i2c_slave_interface_init();
 
 	/* start gpio interface */
 	gpio_interface_init();
