@@ -1,10 +1,10 @@
 {
     "board_id": 20, 
-    "magic": "MAVSTN1", 
-    "description": "Firmware for the MAVSTATION1 board", 
+    "magic": "MAVSTATION", 
+    "description": "Firmware for the Mavstation board", 
     "image": "", 
     "build_time": 0, 
-    "summary": "MAVSTN",
+    "summary": "MAVSTATION",
     "version": "0.1",
     "image_size": 0,
     "git_identity": "",

@@ -95,15 +95,42 @@ struct sensor_combined_s {
 	float magnetometer_cuttoff_freq_hz;	/**< Internal analog low pass frequency of sensor */
 	uint64_t magnetometer_timestamp;	/**< Magnetometer timestamp         */
 
+	int16_t	gyro1_raw[3];			/**< Raw sensor values of angular velocity        */
+	float gyro1_rad_s[3];			/**< Angular velocity in radian per seconds       */
+	uint64_t gyro1_timestamp;		/**< Gyro timestamp */
+
+	int16_t accelerometer1_raw[3];		/**< Raw acceleration in NED body frame           */
+	float accelerometer1_m_s2[3];		/**< Acceleration in NED body frame, in m/s^2     */
+	uint64_t accelerometer1_timestamp;	/**< Accelerometer timestamp        */
+
+	int16_t	magnetometer1_raw[3];		/**< Raw magnetic field in NED body frame         */
+	float magnetometer1_ga[3];		/**< Magnetic field in NED body frame, in Gauss   */
+	uint64_t magnetometer1_timestamp;	/**< Magnetometer timestamp         */
+
+	int16_t	gyro2_raw[3];			/**< Raw sensor values of angular velocity        */
+	float gyro2_rad_s[3];			/**< Angular velocity in radian per seconds       */
+	uint64_t gyro2_timestamp;		/**< Gyro timestamp */
+
+	int16_t accelerometer2_raw[3];		/**< Raw acceleration in NED body frame           */
+	float accelerometer2_m_s2[3];		/**< Acceleration in NED body frame, in m/s^2     */
+	uint64_t accelerometer2_timestamp;	/**< Accelerometer timestamp        */
+
+	int16_t	magnetometer2_raw[3];		/**< Raw magnetic field in NED body frame         */
+	float magnetometer2_ga[3];		/**< Magnetic field in NED body frame, in Gauss   */
+	uint64_t magnetometer2_timestamp;	/**< Magnetometer timestamp         */
+
 	float baro_pres_mbar;			/**< Barometric pressure, already temp. comp.     */
 	float baro_alt_meter;			/**< Altitude, already temp. comp.                */
 	float baro_temp_celcius;		/**< Temperature in degrees celsius               */
-	float adc_voltage_v[4];			/**< ADC voltages of ADC Chan 10/11/12/13 or -1      */
+	float adc_voltage_v[10];		/**< ADC voltages of ADC Chan 10/11/12/13 or -1      */
+	unsigned adc_mapping[10];		/**< Channel indices of each of these values */
 	float mcu_temp_celcius;			/**< Internal temperature measurement of MCU */
 	uint64_t baro_timestamp;		/**< Barometer timestamp        */
 
 	float differential_pressure_pa;				/**< Airspeed sensor differential pressure                  */
 	uint64_t differential_pressure_timestamp;		/**< Last measurement timestamp */
+	float differential_pressure_filtered_pa;	/**< Low pass filtered airspeed sensor differential pressure reading */
+
 };
 
 /**

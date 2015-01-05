@@ -72,6 +72,8 @@
 
 #include <board_config.h>
 
+#include "sf0x_parser.h"
+
 /* Configuration Constants */
 
 /* oddly, ERROR is not defined for c++ */
@@ -120,9 +122,12 @@ private:
 	int				_fd;
 	char				_linebuf[10];
 	unsigned			_linebuf_index;
+	enum SF0X_PARSE_STATE		_parse_state;
 	hrt_abstime			_last_read;
 
 	orb_advert_t			_range_finder_topic;
+
+	unsigned			_consecutive_fail_count;
 
 	perf_counter_t			_sample_perf;
 	perf_counter_t			_comms_errors;
@@ -184,8 +189,10 @@ SF0X::SF0X(const char *port) :
 	_collect_phase(false),
 	_fd(-1),
 	_linebuf_index(0),
+	_parse_state(SF0X_PARSE_STATE0_UNSYNC),
 	_last_read(0),
 	_range_finder_topic(-1),
+	_consecutive_fail_count(0),
 	_sample_perf(perf_alloc(PC_ELAPSED, "sf0x_read")),
 	_comms_errors(perf_alloc(PC_COUNT, "sf0x_comms_errors")),
 	_buffer_overflows(perf_alloc(PC_COUNT, "sf0x_buffer_overflows"))
@@ -196,12 +203,6 @@ SF0X::SF0X(const char *port) :
 	if (_fd < 0) {
 		warnx("FAIL: laser fd");
 	}
-
-	/* tell it to stop auto-triggering */
-	char stop_auto = ' ';
-	(void)::write(_fd, &stop_auto, 1);
-	usleep(100);
-	(void)::write(_fd, &stop_auto, 1);
 
 	struct termios uart_config;
 
@@ -251,9 +252,6 @@ SF0X::~SF0X()
 int
 SF0X::init()
 {
-	int ret = ERROR;
-	unsigned i = 0;
-
 	/* do regular cdev init */
 	if (CDev::init() != OK) {
 		goto out;
@@ -276,34 +274,11 @@ SF0X::init()
 		warnx("advert err");
 	}
 
-	/* attempt to get a measurement 5 times */
-	while (ret != OK && i < 5) {
-
-		if (measure()) {
-			ret = ERROR;
-			_sensor_ok = false;
-		}
-
-		usleep(100000);
-
-		if (collect()) {
-			ret = ERROR;
-			_sensor_ok = false;
-
-		} else {
-			ret = OK;
-			/* sensor is ok, but we don't really know if it is within range */
-			_sensor_ok = true;
-		}
-
-		i++;
-	}
-
 	/* close the fd */
 	::close(_fd);
 	_fd = -1;
 out:
-	return ret;
+	return OK;
 }
 
 int
@@ -376,6 +351,7 @@ SF0X::ioctl(struct file *filp, int cmd, unsigned long arg)
 
 			/* adjust to a legal polling interval in Hz */
 			default: {
+
 					/* do we need to start internal polling? */
 					bool want_start = (_measure_ticks == 0);
 
@@ -542,16 +518,15 @@ SF0X::collect()
 	/* clear buffer if last read was too long ago */
 	uint64_t read_elapsed = hrt_elapsed_time(&_last_read);
 
-	if (read_elapsed > (SF0X_CONVERSION_INTERVAL * 2)) {
-		_linebuf_index = 0;
-	}
+	/* the buffer for read chars is buflen minus null termination */
+	char readbuf[sizeof(_linebuf)];
+	unsigned readlen = sizeof(readbuf) - 1;
 
 	/* read from the sensor (uart buffer) */
-	ret = ::read(_fd, &_linebuf[_linebuf_index], sizeof(_linebuf) - _linebuf_index);
+	ret = ::read(_fd, &readbuf[0], readlen);
 
 	if (ret < 0) {
-		_linebuf[sizeof(_linebuf) - 1] = '\0';
-		debug("read err: %d lbi: %d buf: %s", ret, (int)_linebuf_index, _linebuf);
+		debug("read err: %d", ret);
 		perf_count(_comms_errors);
 		perf_end(_sample_perf);
 
@@ -562,41 +537,26 @@ SF0X::collect()
 		} else {
 			return -EAGAIN;
 		}
-	}
-
-	_linebuf_index += ret;
-
-	if (_linebuf_index >= sizeof(_linebuf)) {
-		_linebuf_index = 0;
+	} else if (ret == 0) {
+		return -EAGAIN;
 	}
 
 	_last_read = hrt_absolute_time();
 
-	if (_linebuf[_linebuf_index - 2] != '\r' || _linebuf[_linebuf_index - 1] != '\n') {
-		/* incomplete read, reschedule ourselves */
+	float si_units;
+	bool valid = false;
+	
+	for (int i = 0; i < ret; i++) {
+		if (OK == sf0x_parser(readbuf[i], _linebuf, &_linebuf_index, &_parse_state, &si_units)) {
+			valid = true;
+		}
+	}
+
+	if (!valid) {
 		return -EAGAIN;
 	}
 
-	char *end;
-	float si_units;
-	bool valid;
-
-	/* enforce line ending */
-	_linebuf[sizeof(_linebuf) - 1] = '\0';
-
-	if (_linebuf[0] == '-' && _linebuf[1] == '-' && _linebuf[2] == '.') {
-		si_units = -1.0f;
-		valid = false;
-
-	} else {
-		si_units = strtod(_linebuf, &end);
-		valid = true;
-	}
-
-	debug("val (float): %8.4f, raw: %s\n", si_units, _linebuf);
-
-	/* done with this chunk, resetting */
-	_linebuf_index = 0;
+	debug("val (float): %8.4f, raw: %s, valid: %s", (double)si_units, _linebuf, ((valid) ? "OK" : "NO"));
 
 	struct range_finder_report report;
 
@@ -679,20 +639,29 @@ SF0X::cycle()
 		int collect_ret = collect();
 
 		if (collect_ret == -EAGAIN) {
-			/* reschedule to grab the missing bits, time to transmit 10 bytes @9600 bps */
+			/* reschedule to grab the missing bits, time to transmit 8 bytes @ 9600 bps */
 			work_queue(HPWORK,
 				   &_work,
 				   (worker_t)&SF0X::cycle_trampoline,
 				   this,
-				   USEC2TICK(1100));
+				   USEC2TICK(1042 * 8));
 			return;
 		}
 
 		if (OK != collect_ret) {
-			log("collection error");
+
+			/* we know the sensor needs about four seconds to initialize */
+			if (hrt_absolute_time() > 5 * 1000 * 1000LL && _consecutive_fail_count < 5) {
+				log("collection error #%u", _consecutive_fail_count);
+			}
+			_consecutive_fail_count++;
+
 			/* restart the measurement state machine */
 			start();
 			return;
+		} else {
+			/* apparently success */
+			_consecutive_fail_count = 0;
 		}
 
 		/* next phase is measurement */
@@ -754,7 +723,7 @@ const int ERROR = -1;
 
 SF0X	*g_dev;
 
-void	start();
+void	start(const char *port);
 void	stop();
 void	test();
 void	reset();
@@ -848,10 +817,10 @@ test()
 	}
 
 	warnx("single read");
-	warnx("measurement: %0.2f m", (double)report.distance);
-	warnx("time:        %lld", report.timestamp);
+	warnx("val:  %0.2f m", (double)report.distance);
+	warnx("time: %lld", report.timestamp);
 
-	/* start the sensor polling at 2Hz */
+	/* start the sensor polling at 2 Hz rate */
 	if (OK != ioctl(fd, SENSORIOCSPOLLRATE, 2)) {
 		errx(1, "failed to set 2Hz poll rate");
 	}
@@ -866,24 +835,26 @@ test()
 		int ret = poll(&fds, 1, 2000);
 
 		if (ret != 1) {
-			errx(1, "timed out waiting for sensor data");
+			warnx("timed out");
+			break;
 		}
 
 		/* now go get it */
 		sz = read(fd, &report, sizeof(report));
 
 		if (sz != sizeof(report)) {
-			err(1, "periodic read failed");
+			warnx("read failed: got %d vs exp. %d", sz, sizeof(report));
+			break;
 		}
 
-		warnx("periodic read %u", i);
-		warnx("measurement: %0.3f", (double)report.distance);
-		warnx("time:        %lld", report.timestamp);
+		warnx("read #%u", i);
+		warnx("val:  %0.3f m", (double)report.distance);
+		warnx("time: %lld", report.timestamp);
 	}
 
-	/* reset the sensor polling to default rate */
+	/* reset the sensor polling to the default rate */
 	if (OK != ioctl(fd, SENSORIOCSPOLLRATE, SENSOR_POLLRATE_DEFAULT)) {
-		errx(1, "failed to set default poll rate");
+		errx(1, "ERR: DEF RATE");
 	}
 
 	errx(0, "PASS");

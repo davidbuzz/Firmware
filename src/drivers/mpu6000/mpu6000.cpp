@@ -174,7 +174,7 @@
   SPI speed
  */
 #define MPU6000_LOW_BUS_SPEED				1000*1000
-#define MPU6000_HIGH_BUS_SPEED				10*1000*1000
+#define MPU6000_HIGH_BUS_SPEED				11*1000*1000 /* will be rounded to 10.4 MHz, within margins for MPU6K */
 
 class MPU6000_gyro;
 
@@ -215,6 +215,7 @@ private:
 	float			_accel_range_scale;
 	float			_accel_range_m_s2;
 	orb_advert_t		_accel_topic;
+	orb_id_t		_accel_orb_id;
 	int			_accel_class_instance;
 
 	RingBuffer		*_gyro_reports;
@@ -344,6 +345,9 @@ private:
 	*/
 	void _set_sample_rate(uint16_t desired_sample_rate_hz);
 
+	/* do not allow to copy this class due to pointer data members */
+	MPU6000(const MPU6000&);
+	MPU6000 operator=(const MPU6000&);
 };
 
 /**
@@ -368,8 +372,12 @@ protected:
 private:
 	MPU6000			*_parent;
 	orb_advert_t		_gyro_topic;
+	orb_id_t		_gyro_orb_id;
 	int			_gyro_class_instance;
 
+	/* do not allow to copy this class due to pointer data members */
+	MPU6000_gyro(const MPU6000_gyro&);
+	MPU6000_gyro operator=(const MPU6000_gyro&);
 };
 
 /** driver 'main' command */
@@ -379,13 +387,17 @@ MPU6000::MPU6000(int bus, const char *path_accel, const char *path_gyro, spi_dev
 	SPI("MPU6000", path_accel, bus, device, SPIDEV_MODE3, MPU6000_LOW_BUS_SPEED),
 	_gyro(new MPU6000_gyro(this, path_gyro)),
 	_product(0),
+	_call{},
 	_call_interval(0),
 	_accel_reports(nullptr),
+	_accel_scale{},
 	_accel_range_scale(0.0f),
 	_accel_range_m_s2(0.0f),
 	_accel_topic(-1),
+	_accel_orb_id(nullptr),
 	_accel_class_instance(-1),
 	_gyro_reports(nullptr),
+	_gyro_scale{},
 	_gyro_range_scale(0.0f),
 	_gyro_range_rad_s(0.0f),
 	_sample_rate(1000),
@@ -403,7 +415,7 @@ MPU6000::MPU6000(int bus, const char *path_accel, const char *path_gyro, spi_dev
 	_rotation(rotation)
 {
 	// disable debug() calls
-	_debug_enabled = true;
+	_debug_enabled = false;
 
 	// default accel scale factors
 	_accel_scale.x_offset = 0;
@@ -501,31 +513,56 @@ MPU6000::init()
 
 	measure();
 
-	if (_accel_class_instance == CLASS_DEVICE_PRIMARY) {
+	/* advertise sensor topic, measure manually to initialize valid report */
+	struct accel_report arp;
+	_accel_reports->get(&arp);
 
-		/* advertise sensor topic, measure manually to initialize valid report */
-		struct accel_report arp;
-		_accel_reports->get(&arp);
+	/* measurement will have generated a report, publish */
+	switch (_accel_class_instance) {
+		case CLASS_DEVICE_PRIMARY:
+			_accel_orb_id = ORB_ID(sensor_accel0);
+			break;
+		
+		case CLASS_DEVICE_SECONDARY:
+			_accel_orb_id = ORB_ID(sensor_accel1);
+			break;
 
-		/* measurement will have generated a report, publish */
-		_accel_topic = orb_advertise(ORB_ID(sensor_accel), &arp);
-
-		if (_accel_topic < 0)
-			debug("failed to create sensor_accel publication");
+		case CLASS_DEVICE_TERTIARY:
+			_accel_orb_id = ORB_ID(sensor_accel2);
+			break;
 
 	}
 
-	if (_gyro->_gyro_class_instance == CLASS_DEVICE_PRIMARY) {
+	_accel_topic = orb_advertise(_accel_orb_id, &arp);
 
-		/* advertise sensor topic, measure manually to initialize valid report */
-		struct gyro_report grp;
-		_gyro_reports->get(&grp);
+	if (_accel_topic < 0) {
+		warnx("ADVERT FAIL");
+	}
 
-		_gyro->_gyro_topic = orb_advertise(ORB_ID(sensor_gyro), &grp);
 
-		if (_gyro->_gyro_topic < 0)
-			debug("failed to create sensor_gyro publication");
+	/* advertise sensor topic, measure manually to initialize valid report */
+	struct gyro_report grp;
+	_gyro_reports->get(&grp);
 
+	switch (_gyro->_gyro_class_instance) {
+		case CLASS_DEVICE_PRIMARY:
+			_gyro->_gyro_orb_id = ORB_ID(sensor_gyro0);
+			break;
+
+		case CLASS_DEVICE_SECONDARY:
+			_gyro->_gyro_orb_id = ORB_ID(sensor_gyro1);
+			break;
+
+		case CLASS_DEVICE_TERTIARY:
+			_gyro->_gyro_orb_id = ORB_ID(sensor_gyro2);
+			break;
+
+	}
+
+	_gyro->_gyro_topic = orb_advertise(_gyro->_gyro_orb_id, &grp);
+
+	if (_gyro->_gyro_topic < 0) {
+		warnx("ADVERT FAIL");
 	}
 
 out:
@@ -554,7 +591,7 @@ void MPU6000::reset()
 	write_reg(MPUREG_USER_CTRL, BIT_I2C_IF_DIS);
         irqrestore(state);
 
-	up_udelay(1000);
+	usleep(1000);
 
 	// SAMPLE RATE
 	_set_sample_rate(_sample_rate);
@@ -876,12 +913,14 @@ MPU6000::ioctl(struct file *filp, int cmd, unsigned long arg)
 					// adjust filters
 					float cutoff_freq_hz = _accel_filter_x.get_cutoff_freq();
 					float sample_rate = 1.0e6f/ticks;
+					_set_dlpf_filter(cutoff_freq_hz);
 					_accel_filter_x.set_cutoff_frequency(sample_rate, cutoff_freq_hz);
 					_accel_filter_y.set_cutoff_frequency(sample_rate, cutoff_freq_hz);
 					_accel_filter_z.set_cutoff_frequency(sample_rate, cutoff_freq_hz);
 
 
 					float cutoff_freq_hz_gyro = _gyro_filter_x.get_cutoff_freq();
+					_set_dlpf_filter(cutoff_freq_hz_gyro);
 					_gyro_filter_x.set_cutoff_frequency(sample_rate, cutoff_freq_hz_gyro);
 					_gyro_filter_y.set_cutoff_frequency(sample_rate, cutoff_freq_hz_gyro);
 					_gyro_filter_z.set_cutoff_frequency(sample_rate, cutoff_freq_hz_gyro);
@@ -934,11 +973,9 @@ MPU6000::ioctl(struct file *filp, int cmd, unsigned long arg)
 		return _accel_filter_x.get_cutoff_freq();
 
 	case ACCELIOCSLOWPASS:
-		if (arg == 0) {
-			// allow disabling of on-chip filter using
-			// zero as desired filter frequency
-			_set_dlpf_filter(0);
-		}
+		// set hardware filtering
+		_set_dlpf_filter(arg);
+		// set software filtering
 		_accel_filter_x.set_cutoff_frequency(1.0e6f / _call_interval, arg);
 		_accel_filter_y.set_cutoff_frequency(1.0e6f / _call_interval, arg);
 		_accel_filter_z.set_cutoff_frequency(1.0e6f / _call_interval, arg);
@@ -1019,14 +1056,11 @@ MPU6000::gyro_ioctl(struct file *filp, int cmd, unsigned long arg)
 	case GYROIOCGLOWPASS:
 		return _gyro_filter_x.get_cutoff_freq();
 	case GYROIOCSLOWPASS:
+		// set hardware filtering
+		_set_dlpf_filter(arg);
 		_gyro_filter_x.set_cutoff_frequency(1.0e6f / _call_interval, arg);
 		_gyro_filter_y.set_cutoff_frequency(1.0e6f / _call_interval, arg);
 		_gyro_filter_z.set_cutoff_frequency(1.0e6f / _call_interval, arg);
-		if (arg == 0) {
-			// allow disabling of on-chip filter using 0
-			// as desired frequency
-			_set_dlpf_filter(0);
-		}
 		return OK;
 
 	case GYROIOCSSCALE:
@@ -1248,7 +1282,10 @@ MPU6000::measure()
 		// all zero data - probably a SPI bus error
 		perf_count(_bad_transfers);
 		perf_end(_sample_perf);
-		//reset();
+                // note that we don't call reset() here as a reset()
+                // costs 20ms with interrupts disabled. That means if
+                // the mpu6k does go bad it would cause a FMU failure,
+                // regardless of whether another sensor is available,
 		return;
 	}
 
@@ -1351,14 +1388,14 @@ MPU6000::measure()
 	poll_notify(POLLIN);
 	_gyro->parent_poll_notify();
 
-	if (_accel_topic > 0 && !(_pub_blocked)) {
+	if (!(_pub_blocked)) {
 		/* publish it */
-		orb_publish(ORB_ID(sensor_accel), _accel_topic, &arb);
+		orb_publish(_accel_orb_id, _accel_topic, &arb);
 	}
 
-	if (_gyro->_gyro_topic > 0 && !(_pub_blocked)) {
+	if (!(_pub_blocked)) {
 		/* publish it */
-		orb_publish(ORB_ID(sensor_gyro), _gyro->_gyro_topic, &grb);
+		orb_publish(_gyro->_gyro_orb_id, _gyro->_gyro_topic, &grb);
 	}
 
 	/* stop measuring */
@@ -1381,6 +1418,7 @@ MPU6000_gyro::MPU6000_gyro(MPU6000 *parent, const char *path) :
 	CDev("MPU6000_gyro", path),
 	_parent(parent),
 	_gyro_topic(-1),
+	_gyro_orb_id(nullptr),
 	_gyro_class_instance(-1)
 {
 }
@@ -1441,9 +1479,13 @@ void	start(bool, enum Rotation);
 void	test(bool);
 void	reset(bool);
 void	info(bool);
+void	usage();
 
 /**
  * Start the driver.
+ *
+ * This function only returns if the driver is up and running
+ * or failed to detect the sensor.
  */
 void
 start(bool external_bus, enum Rotation rotation)
@@ -1514,7 +1556,7 @@ test(bool external_bus)
 	int fd = open(path_accel, O_RDONLY);
 
 	if (fd < 0)
-		err(1, "%s open failed (try 'mpu6000 start' if the driver is not running)",
+		err(1, "%s open failed (try 'mpu6000 start')",
 		    path_accel);
 
 	/* get the driver */
@@ -1612,17 +1654,16 @@ info(bool external_bus)
 	exit(0);
 }
 
-
-} // namespace
-
 void
-mpu6000_usage()
+usage()
 {
 	warnx("missing command: try 'start', 'info', 'test', 'reset'");
 	warnx("options:");
 	warnx("    -X    (external bus)");
 	warnx("    -R rotation");
 }
+
+} // namespace
 
 int
 mpu6000_main(int argc, char *argv[])
@@ -1641,7 +1682,7 @@ mpu6000_main(int argc, char *argv[])
 			rotation = (enum Rotation)atoi(optarg);
 			break;
 		default:
-			mpu6000_usage();
+			mpu6000::usage();
 			exit(0);
 		}
 	}

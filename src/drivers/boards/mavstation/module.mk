@@ -3,4 +3,6 @@
 #
 
 SRCS		= mavstation_init.c \
-		  mavstation_pwm_servo.c
+		  mavstation_pwm_servo.c \
+		  mavstation_usb.c \
+		  mavstation_led.c

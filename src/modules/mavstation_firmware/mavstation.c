@@ -37,6 +37,7 @@
  */
 
 #include <nuttx/config.h>
+#include <nuttx/arch.h>
 
 #include <stdio.h>	// required for task_create
 #include <stdbool.h>
@@ -44,6 +45,7 @@
 #include <errno.h>
 #include <string.h>
 #include <poll.h>
+#include <time.h>
 #include <signal.h>
 
 #include <drivers/drv_pwm_output.h>
@@ -61,18 +63,21 @@
 
 __EXPORT int user_start(int argc, char *argv[]);
 
-extern void up_cxxinitialize(void);
+//extern void up_cxxinitialize(void);
 
 struct sys_state_s system_state;
 
+#ifdef CONFIG_ARCH_DMA
 static struct hrt_call serial_dma_call;
+#endif
+int MuxFlag,MuxState;
 
-
+__EXPORT int mavstation_main(int argc, char *argv[]);
 int
-user_start(int argc, char *argv[])
+mavstation_main(int argc, char *argv[])
 {
 	/* run C++ ctors before we go any further */
-	up_cxxinitialize();
+	//up_cxxinitialize();
 
 	/* reset all to zero */
 	memset(&system_state, 0, sizeof(system_state));
@@ -97,10 +102,13 @@ user_start(int argc, char *argv[])
 	/* start the i2c slave interface */
 	//i2c_slave_interface_init();
 
+	//up_lowputc("G");
 	/* start gpio interface */
 	gpio_interface_init();
 	/* pass usart2 to raspberry pi by default */
-	gpio_interface_setusart2mux(true);
+	gpio_interface_setusart2mux(false);
+	MuxState=0;
+	MuxFlag=0;
 
 	/* add a performance counter for the interface */
 	perf_counter_t interface_perf = perf_alloc(PC_ELAPSED, "interface");
@@ -109,6 +117,7 @@ user_start(int argc, char *argv[])
 	perf_counter_t loop_perf = perf_alloc(PC_INTERVAL, "loop");
 
 	struct mallinfo minfo = mallinfo();
+	//up_udelay(6000000);
 	debug("MEM: free %u, largest %u\n", minfo.mxordblk, minfo.fordblks);
 
 	/*
@@ -125,12 +134,32 @@ user_start(int argc, char *argv[])
 		i2c_slave_interface_tick();
 		gpio_interface_tick();
 
+		if(gpio_interface_getbtn(0)&!MuxFlag)
+		{
+			if(MuxState)
+			{
+				gpio_interface_setusart2mux(false);
+				gpio_interface_setled(2,1);
+				MuxState=0;
+
+			}else{
+				gpio_interface_setusart2mux(true);
+				gpio_interface_setled(2,0);
+				MuxState=1;
+			}
+			MuxFlag=1;
+		}else if(!gpio_interface_getbtn(0))
+		{
+			MuxFlag=0;
+		}
+
 #define DEBUG_GPIOS
 #ifdef DEBUG_GPIOS
-		for (int i = 0; i < 5; i++) {
-			gpio_interface_setled((i%3), gpio_interface_getbtn(i));
+		for (int i = 1; i < 5; i++) {
+			gpio_interface_setled(((i%2)), gpio_interface_getbtn(i));
 		}
 #endif
+
 
 		perf_end(interface_perf);
 

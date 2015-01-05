@@ -157,12 +157,12 @@ private:
 	mag_scale		_scale;
 	float 			_range_scale;
 	float 			_range_ga;
-	uint8_t			_range_bits;
-	uint8_t			_conf_reg;
 	bool			_collect_phase;
 	int			_class_instance;
 
 	orb_advert_t		_mag_topic;
+	orb_advert_t		_subsystem_pub;
+	orb_id_t		_mag_orb_id;
 
 	perf_counter_t		_sample_perf;
 	perf_counter_t		_comms_errors;
@@ -178,6 +178,9 @@ private:
 	enum Rotation		_rotation;
 
 	struct mag_report	_last_report;           /**< used for info() */
+
+	uint8_t			_range_bits;
+	uint8_t			_conf_reg;
 
 	/**
 	 * Test whether the device supported by the driver is present at a
@@ -335,6 +338,9 @@ private:
 	 */
 	 int 			check_offset();
 
+	/* this class has pointer data members, do not allow copying it */
+	HMC5883(const HMC5883&);
+	HMC5883 operator=(const HMC5883&);
 };
 
 /*
@@ -345,14 +351,17 @@ extern "C" __EXPORT int hmc5883_main(int argc, char *argv[]);
 
 HMC5883::HMC5883(int bus, const char *path, enum Rotation rotation) :
 	I2C("HMC5883", path, bus, HMC5883L_ADDRESS, 400000),
+	_work{},
 	_measure_ticks(0),
 	_reports(nullptr),
+	_scale{},
 	_range_scale(0), /* default range scale from counts to gauss */
 	_range_ga(1.3f),
-	_range_bits(0),
-	_conf_reg(0),
+	_collect_phase(false),
 	_class_instance(-1),
 	_mag_topic(-1),
+	_subsystem_pub(-1),
+	_mag_orb_id(nullptr),
 	_sample_perf(perf_alloc(PC_ELAPSED, "hmc5883_read")),
 	_comms_errors(perf_alloc(PC_COUNT, "hmc5883_comms_errors")),
 	_buffer_overflows(perf_alloc(PC_COUNT, "hmc5883_buffer_overflows")),
@@ -361,7 +370,10 @@ HMC5883::HMC5883(int bus, const char *path, enum Rotation rotation) :
 	_sensor_ok(false),
 	_calibrated(false),
 	_bus(bus),
-	_rotation(rotation)
+	_rotation(rotation),
+	_last_report{0},
+	_range_bits(0),
+	_conf_reg(0)
 {
 	_device_id.devid_s.devtype = DRV_MAG_DEVTYPE_HMC5883;
 
@@ -417,6 +429,20 @@ HMC5883::init()
 	reset();
 
 	_class_instance = register_class_devname(MAG_DEVICE_PATH);
+
+	switch (_class_instance) {
+		case CLASS_DEVICE_PRIMARY:
+			_mag_orb_id = ORB_ID(sensor_mag0);
+			break;
+
+		case CLASS_DEVICE_SECONDARY:
+			_mag_orb_id = ORB_ID(sensor_mag1);
+			break;
+
+		case CLASS_DEVICE_TERTIARY:
+			_mag_orb_id = ORB_ID(sensor_mag2);
+			break;
+	}
 
 	ret = OK;
 	/* sensor is ok, but not calibrated */
@@ -793,7 +819,7 @@ HMC5883::cycle()
 
 		/* perform collection */
 		if (OK != collect()) {
-			log("collection error");
+			debug("collection error");
 			/* restart the measurement state machine */
 			start();
 			return;
@@ -820,7 +846,7 @@ HMC5883::cycle()
 
 	/* measurement phase */
 	if (OK != measure())
-		log("measure error");
+		debug("measure error");
 
 	/* next phase is collection */
 	_collect_phase = true;
@@ -862,7 +888,8 @@ HMC5883::collect()
 	struct {
 		int16_t		x, y, z;
 	} report;
-	int	ret = -EIO;
+
+	int	ret;
 	uint8_t	cmd;
 	uint8_t check_counter;
 
@@ -940,16 +967,16 @@ HMC5883::collect()
 	// apply user specified rotation
 	rotate_3f(_rotation, new_report.x, new_report.y, new_report.z);
 
-	if (_class_instance == CLASS_DEVICE_PRIMARY && !(_pub_blocked)) {
+	if (!(_pub_blocked)) {
 
 		if (_mag_topic != -1) {
 			/* publish it */
-			orb_publish(ORB_ID(sensor_mag), _mag_topic, &new_report);
+			orb_publish(_mag_orb_id, _mag_topic, &new_report);
 		} else {
-			_mag_topic = orb_advertise(ORB_ID(sensor_mag), &new_report);
+			_mag_topic = orb_advertise(_mag_orb_id, &new_report);
 
 			if (_mag_topic < 0)
-				debug("failed to create sensor_mag publication");
+				debug("ADVERT FAIL");
 		}
 	}
 
@@ -1152,7 +1179,7 @@ int HMC5883::calibrate(struct file *filp, unsigned enable)
 out:
 
 	if (OK != ioctl(filp, MAGIOCSSCALE, (long unsigned int)&mscale_previous)) {
-		warn("WARNING: failed to set new scale / offsets for mag");
+		warn("failed to set new scale / offsets for mag");
 	}
 
 	/* set back to normal mode */
@@ -1233,13 +1260,12 @@ int HMC5883::check_calibration()
 			true,
 			_calibrated,
 			SUBSYSTEM_TYPE_MAG};
-		static orb_advert_t pub = -1;
 
 		if (!(_pub_blocked)) {
-			if (pub > 0) {
-				orb_publish(ORB_ID(subsystem_info), pub, &info);
+			if (_subsystem_pub > 0) {
+				orb_publish(ORB_ID(subsystem_info), _subsystem_pub, &info);
 			} else {
-				pub = orb_advertise(ORB_ID(subsystem_info), &info);
+				_subsystem_pub = orb_advertise(ORB_ID(subsystem_info), &info);
 			}
 		}
 	}
@@ -1257,14 +1283,13 @@ int HMC5883::set_excitement(unsigned enable)
 	if (OK != ret)
 		perf_count(_comms_errors);
 
+	_conf_reg &= ~0x03; // reset previous excitement mode
 	if (((int)enable) < 0) {
 		_conf_reg |= 0x01;
 
 	} else if (enable > 0) {
 		_conf_reg |= 0x02;
 
-	} else {
-		_conf_reg &= ~0x03;
 	}
 
         // ::printf("set_excitement enable=%d regA=0x%x\n", (int)enable, (unsigned)_conf_reg);
@@ -1321,7 +1346,7 @@ HMC5883::print_info()
 	printf("offsets (%.2f %.2f %.2f)\n", (double)_scale.x_offset, (double)_scale.y_offset, (double)_scale.z_offset);
 	printf("scaling (%.2f %.2f %.2f) 1/range_scale %.2f range_ga %.2f\n", 
 	       (double)_scale.x_scale, (double)_scale.y_scale, (double)_scale.z_scale,
-	       (double)1.0/_range_scale, (double)_range_ga);
+	       (double)(1.0f/_range_scale), (double)_range_ga);
 	_reports->print_info("report queue");
 }
 
@@ -1340,15 +1365,18 @@ const int ERROR = -1;
 HMC5883	*g_dev_int = nullptr;
 HMC5883	*g_dev_ext = nullptr;
 
-void	hmc5883_usage();
 void	start(int bus, enum Rotation rotation);
 void	test(int bus);
 void	reset(int bus);
 void	info(int bus);
 int	calibrate(int bus);
+void	usage();
 
 /**
  * Start the driver.
+ *
+ * This function call only returns once the driver
+ * is either successfully up and running or failed to start.
  */
 void
 start(int bus, enum Rotation rotation)
@@ -1444,7 +1472,7 @@ test(int bus)
 	int fd = open(path, O_RDONLY);
 
 	if (fd < 0)
-		err(1, "%s open failed (try 'hmc5883 start' if the driver is not running", path);
+		err(1, "%s open failed (try 'hmc5883 start')", path);
 
 	/* do a simple demand read */
 	sz = read(fd, &report, sizeof(report));
@@ -1599,10 +1627,8 @@ info(int bus)
 	exit(0);
 }
 
-} // namespace
-
 void
-hmc5883_usage()
+usage()
 {
 	warnx("missing command: try 'start', 'info', 'test', 'reset', 'info', 'calibrate'");
 	warnx("options:");
@@ -1613,6 +1639,8 @@ hmc5883_usage()
 	warnx("    -I only internal bus");
 #endif
 }
+
+} // namespace
 
 int
 hmc5883_main(int argc, char *argv[])
@@ -1639,7 +1667,7 @@ hmc5883_main(int argc, char *argv[])
 			calibrate = true;
 			break;
 		default:
-			hmc5883_usage();
+			hmc5883::usage();
 			exit(0);
 		}
 	}

@@ -110,7 +110,7 @@ const struct {
 	{"conv",		test_conv,	OPT_NOJIGTEST | OPT_NOALLTEST},
 	{"mount",		test_mount,	OPT_NOJIGTEST | OPT_NOALLTEST},
 	{"mtd",			test_mtd,	0},
-#ifndef ARDUPILOT_BUILD
+#ifndef TESTS_MATHLIB_DISABLE
 	{"mathlib",		test_mathlib,	0},
 #endif
 	{"help",		test_help,	OPT_NOALLTEST | OPT_NOHELP | OPT_NOJIGTEST},
@@ -237,7 +237,7 @@ test_perf(int argc, char *argv[])
 	printf("perf: expect count of 1\n");
 	perf_print_counter(ec);
 	printf("perf: expect at least two counters\n");
-	perf_print_all();
+	perf_print_all(0);
 
 	perf_free(cc);
 	perf_free(ec);
