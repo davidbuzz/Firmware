@@ -7,3 +7,6 @@
 [submodule "NuttXmain"]
 	path = NuttXmain
 	url = git://github.com/PX4/NuttX.git
+[submodule "NuttXkbrtny"]
+	path = NuttXkbrtny
+	url = https://github.com/kbrtny/PX4NuttX
