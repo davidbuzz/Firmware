@@ -362,10 +362,10 @@ class uploader(object):
                 # OTP added in v4: 
                 if self.bl_rev > 3: 
                     #print("OTP(first 5 blocks)")
-                    for byte in range(0,32*5,4):
+                    for byte in range(0,32*6,4):
                         x = self.__getOTP(byte)
                         self.otp  = self.otp + x
-                    #    print(" " + binascii.hexlify(x)),
+                        print(" " + binascii.hexlify(x)),
                     #print
                     #according to src/modules/systemlib/otp.h in px4 code:  
                     # first block is: 

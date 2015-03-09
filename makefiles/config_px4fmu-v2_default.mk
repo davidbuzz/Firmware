@@ -45,6 +45,7 @@ MODULES		+= modules/sensors
 #
 MODULES		+= systemcmds/ramtron
 MODULES		+= systemcmds/bl_update
+MODULES		+= systemcmds/auth
 MODULES		+= systemcmds/boardinfo
 MODULES		+= systemcmds/mixer
 MODULES		+= systemcmds/param
@@ -94,6 +95,8 @@ MODULES		+= modules/systemlib/mixer
 MODULES		+= modules/mathlib
 MODULES		+= modules/mathlib/math/filter
 MODULES		+= modules/controllib
+MODULES         += modules/libtomfastmath
+MODULES         += modules/libtomcrypt
 MODULES		+= modules/uORB
 
 #
